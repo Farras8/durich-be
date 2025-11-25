@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+
 	"durich-be/internal/controllers"
 	"durich-be/internal/repository"
 	"durich-be/internal/routes"
@@ -9,6 +10,7 @@ import (
 	"durich-be/pkg/authentication"
 	"durich-be/pkg/config"
 	"durich-be/pkg/database"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,26 +20,32 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db := database.Connect(cfg.Database)
+	database.InitDB(cfg.Database)
+	db := database.GetDB()
 
-	jwtService := authentication.NewJWTService(
-		cfg.Authentication.AccessSecretKey,
-		cfg.Authentication.RefreshSecretKey,
-		cfg.Authentication.Issuer,
-		cfg.Authentication.AccessTokenExpiry,
-		cfg.Authentication.RefreshTokenExpiry,
-	)
+	authentication.NewJWTManager(authentication.JWTOptions{
+		AccessSecret:       cfg.Authentication.AccessSecretKey,
+		RefreshSecret:      cfg.Authentication.RefreshSecretKey,
+		Issuer:             cfg.Authentication.Issuer,
+		ExpiryAccessToken:  cfg.Authentication.AccessTokenExpiry,
+		ExpiryRefreshToken: cfg.Authentication.RefreshTokenExpiry,
+	})
 
 	userRepo := repository.NewUserRepository(db)
 	authRepo := repository.NewAuthenticationRepository(db)
 
-	authService := services.NewAuthService(userRepo, authRepo, jwtService)
+	authService := services.NewAuthService(userRepo, authRepo)
+	profileService := services.NewProfileService(userRepo, authRepo)
+	memberService := services.NewMemberService(userRepo, authRepo)
 
 	authController := controllers.NewAuthController(authService)
+	profileController := controllers.NewProfileController(profileService)
+	memberController := controllers.NewMemberController(memberService)
 
 	router := gin.Default()
 
-	routes.SetupAuthRoutes(router, authController)
+	v1 := router.Group("/v1")
+	routes.RegisterAuth(v1, authController, profileController, memberController)
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)
 	router.Run(":" + cfg.Server.Port)

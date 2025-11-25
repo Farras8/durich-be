@@ -39,6 +39,38 @@ func (ctl *AuthController) Register(ctx *gin.Context) {
 	response.SendSuccess(ctx, http.StatusCreated, constants.AuthRegisterSuccess, res)
 }
 
+func (ctl *AuthController) RegisterWarehouse(ctx *gin.Context) {
+	var payload requests.RegisterAdmin
+	if err := utils.BindData(ctx, &payload); err != nil {
+		response.SendError(ctx, errors.ValidationErrorToAppError(err))
+		return
+	}
+
+	res, err := ctl.authService.RegisterWarehouse(ctx, payload)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusCreated, constants.AuthRegisterSuccess, res)
+}
+
+func (ctl *AuthController) RegisterSales(ctx *gin.Context) {
+	var payload requests.RegisterAdmin
+	if err := utils.BindData(ctx, &payload); err != nil {
+		response.SendError(ctx, errors.ValidationErrorToAppError(err))
+		return
+	}
+
+	res, err := ctl.authService.RegisterSales(ctx, payload)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusCreated, constants.AuthRegisterSuccess, res)
+}
+
 func (ctl *AuthController) Login(ctx *gin.Context) {
 	var auth requests.Login
 	if err := utils.BindData(ctx, &auth); err != nil {

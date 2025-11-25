@@ -1,0 +1,11 @@
+CREATE TABLE tb_pengiriman (
+    id VARCHAR(27) PRIMARY KEY,
+    tujuan TEXT NOT NULL,
+    tgl_kirim TIMESTAMPTZ NOT NULL,
+    status TEXT DEFAULT 'OTW',
+    created_by VARCHAR(27) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT fk_created_by FOREIGN KEY (created_by) REFERENCES users(id)
+);

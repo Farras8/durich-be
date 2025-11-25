@@ -7,10 +7,10 @@ import (
 )
 
 type UserAuth struct {
-	AuthID         string `json:"auth_id"`
-	Email          string `json:"email"`
-	Role           string `json:"role"`
-	RefreshTokenID string `json:"refresh_token_id,omitempty"`
+	AuthID         string            `json:"auth_id"`
+	Email          string            `json:"email"`
+	Role           []domain.UserRole `json:"role"`
+	RefreshTokenID string            `json:"refresh_token_id,omitempty"`
 }
 
 type CreateAuth struct {
@@ -28,10 +28,15 @@ func (receiver CreateAuth) ToDomain() domain.Authentication {
 }
 
 func ToTokenPayload(record domain.Authentication) UserAuth {
+	roles := []domain.UserRole{}
+	if record.User != nil {
+		roles = record.User.RoleSystem
+	}
+
 	return UserAuth{
 		AuthID:         record.ID,
 		Email:          record.UserEmail,
-		Role:           record.User.RoleSystem,
+		Role:           roles,
 		RefreshTokenID: ksuid.New().String(),
 	}
 }

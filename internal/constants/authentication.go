@@ -9,4 +9,9 @@ const (
 	AuthInvalidToken                   = "Invalid token"
 	AuthEmailAlreadyExists             = "Email already exists"
 	DataNotFound                       = "Data not found"
+	PasswordChangedSuccess             = "Password changed successfully"
+	PasswordResetSuccess               = "Password reset successfully"
+	OldPasswordIncorrect               = "Old password is incorrect"
+	UserNotFound                       = "User not found"
+	AuthDataNotFound                   = "Authentication data not found"
 )

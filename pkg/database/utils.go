@@ -9,7 +9,7 @@ import (
 
 func RunInTx(
 	ctx context.Context,
-	db *bun.DB,
+	db *Database,
 	opts *sql.TxOptions,
 	fn func(ctx context.Context, tx bun.Tx) error,
 ) error {

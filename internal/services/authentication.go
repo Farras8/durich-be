@@ -20,6 +20,8 @@ import (
 
 type AuthService interface {
 	Register(ctx context.Context, payload requests.RegisterAdmin) (res response.RegisterResponse, err error)
+	RegisterWarehouse(ctx context.Context, payload requests.RegisterAdmin) (res response.RegisterResponse, err error)
+	RegisterSales(ctx context.Context, payload requests.RegisterAdmin) (res response.RegisterResponse, err error)
 	Login(ctx context.Context, payload requests.Login) (res response.LoginResponse, err error)
 	Logout(ctx context.Context) (err error)
 	RefreshToken(
@@ -29,20 +31,21 @@ type AuthService interface {
 }
 
 type authService struct {
-	authRepo repository.AuthenticationRepository
 	userRepo repository.UserRepository
+	authRepo repository.AuthenticationRepository
 }
 
-func NewAuthService(authRepo repository.AuthenticationRepository, userRepo repository.UserRepository) AuthService {
+func NewAuthService(userRepo repository.UserRepository, authRepo repository.AuthenticationRepository) AuthService {
 	return &authService{
-		authRepo: authRepo,
 		userRepo: userRepo,
+		authRepo: authRepo,
 	}
 }
 
-func (a *authService) Register(
+func (a *authService) registerUser(
 	ctx context.Context,
 	payload requests.RegisterAdmin,
+	role domain.UserRole,
 ) (res response.RegisterResponse, err error) {
 	err = database.RunInTx(
 		ctx,
@@ -50,7 +53,7 @@ func (a *authService) Register(
 		&sql.TxOptions{},
 		func(ctx context.Context, tx bun.Tx) error {
 			existingUser, err := a.userRepo.GetByEmail(ctx, payload.Email)
-			if err == nil && existingUser != nil && existingUser.Email != "" {
+			if err == nil && existingUser.Email != "" {
 				return internal_err.ValidationError(constants.AuthEmailAlreadyExists)
 			}
 
@@ -66,7 +69,7 @@ func (a *authService) Register(
 
 			newUser := &domain.User{
 				Email:      payload.Email,
-				RoleSystem: "admin",
+				RoleSystem: []domain.UserRole{role},
 			}
 
 			err = a.userRepo.Create(ctx, newUser)
@@ -97,6 +100,27 @@ func (a *authService) Register(
 	}
 
 	return res, nil
+}
+
+func (a *authService) Register(
+	ctx context.Context,
+	payload requests.RegisterAdmin,
+) (res response.RegisterResponse, err error) {
+	return a.registerUser(ctx, payload, domain.RoleAdmin)
+}
+
+func (a *authService) RegisterWarehouse(
+	ctx context.Context,
+	payload requests.RegisterAdmin,
+) (res response.RegisterResponse, err error) {
+	return a.registerUser(ctx, payload, domain.RoleWarehouse)
+}
+
+func (a *authService) RegisterSales(
+	ctx context.Context,
+	payload requests.RegisterAdmin,
+) (res response.RegisterResponse, err error) {
+	return a.registerUser(ctx, payload, domain.RoleSales)
 }
 
 func (a *authService) Login(
@@ -162,7 +186,7 @@ func (a *authService) Login(
 			res = response.LoginResponse{
 				AccessToken:  pair.AccessToken,
 				RefreshToken: pair.RefreshToken,
-				Role:         tokenPayload.Role,
+				Roles:        tokenPayload.Role,
 			}
 
 			return nil
