@@ -19,7 +19,8 @@ const (
 type User struct {
 	bun.BaseModel `bun:"table:users,alias:user"`
 
-	Email      string     `bun:",pk" json:"email"`
+	ID         string     `bun:",pk" json:"id"`
+	Email      string     `bun:",unique,notnull" json:"email"`
 	RoleSystem []UserRole `bun:",array" json:"role_system"`
 	CreatedAt  time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt  time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
@@ -28,6 +29,10 @@ type User struct {
 
 func (m *User) BeforeAppendModel(_ context.Context, query bun.Query) error {
 	switch query.(type) {
+	case *bun.InsertQuery:
+		if m.ID == "" {
+			m.ID = ksuid.New().String()
+		}
 	case *bun.UpdateQuery:
 		m.UpdatedAt = time.Now()
 	}

@@ -23,6 +23,7 @@ func main() {
 	database.InitDB(cfg.Database)
 	db := database.GetDB()
 
+	authentication.SetupKey(cfg.Authentication.EncryptKey)
 	authentication.NewJWTManager(authentication.JWTOptions{
 		AccessSecret:       cfg.Authentication.AccessSecretKey,
 		RefreshSecret:      cfg.Authentication.RefreshSecretKey,

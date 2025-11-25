@@ -68,6 +68,7 @@ func (a *authService) registerUser(
 			}
 
 			newUser := &domain.User{
+				ID:         ksuid.New().String(),
 				Email:      payload.Email,
 				RoleSystem: []domain.UserRole{role},
 			}
