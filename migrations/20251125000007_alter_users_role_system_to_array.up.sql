@@ -1,0 +1,1 @@
+ALTER TABLE users ALTER COLUMN role_system TYPE TEXT[] USING ARRAY[role_system];

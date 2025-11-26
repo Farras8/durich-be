@@ -1,0 +1,30 @@
+CREATE TABLE jenis_durian (
+    id VARCHAR(27) PRIMARY KEY,
+    kode TEXT,
+    nama_jenis TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMPTZ
+);
+
+INSERT INTO jenis_durian (id, kode, nama_jenis) VALUES
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T001', 'MT', 'Montong'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T002', 'MK', 'Musang King'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T003', 'BW', 'Bawor'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T004', 'PT', 'Petruk'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T005', 'MM', 'Mimang'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T006', 'MH', 'Matahari'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T007', 'PL', 'Pelangi'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T008', 'KN', 'Kani'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T009', 'LL', 'Lai / Lae'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T010', 'HP', 'Hepe'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T011', 'BT', 'Black Thorn'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T012', 'DS', 'D24 Sultan'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T013', 'UR', 'Udang Merah / Red Prawn'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T014', 'TK', 'Tekka'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T015', 'CH', 'Chanee'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T016', 'KY', 'Kanyao'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T017', 'DM', 'Durian Merah'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T018', 'DP', 'Durian Putih'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T019', 'DK', 'Durian Kura-kura'),
+('1SRlQ8zX9vJ2mN5P6Q7R8S9T020', 'DI', 'Durian Isu / Torong');

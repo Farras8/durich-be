@@ -1,10 +1,11 @@
-CREATE TABLE users (
+CREATE TABLE pohon (
     id VARCHAR(27) PRIMARY KEY,
-    email TEXT UNIQUE,
-    role_system TEXT NOT NULL,
+    kode VARCHAR(5) UNIQUE NOT NULL,
+    nama TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMPTZ
 );
 
-
+INSERT INTO pohon (id, kode, nama) VALUES
+('6SRlQ8zX9vJ2mN5P6Q7R8S9T001', '0000', 'Pohon Default');
