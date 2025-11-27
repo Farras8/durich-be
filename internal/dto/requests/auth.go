@@ -6,6 +6,27 @@ import (
 	"github.com/segmentio/ksuid"
 )
 
+// Authentication Request DTOs
+type RegisterAdmin struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=8"`
+}
+
+type Login struct {
+	Email    string `json:"email" binding:"omitempty,email"`
+	Phone    string `json:"phone"`
+	Password string `json:"password" binding:"required"`
+}
+
+type RefreshToken struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+// Internal Authentication DTOs
 type UserAuth struct {
 	AuthID         string            `json:"auth_id"`
 	Email          string            `json:"email"`

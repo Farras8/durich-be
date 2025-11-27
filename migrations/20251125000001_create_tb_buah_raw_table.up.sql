@@ -1,5 +1,6 @@
 CREATE TABLE tb_buah_raw (
     id VARCHAR(27) PRIMARY KEY,
+    kode_buah TEXT NOT NULL,
     jenis_durian TEXT NOT NULL,
     blok_panen VARCHAR(3) NOT NULL,
     pohon_panen VARCHAR(10),
