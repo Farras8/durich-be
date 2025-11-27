@@ -172,6 +172,17 @@ func (a *authService) Login(
 				return internal_err.AuthError(constants.AuthPasswordInvalidOrEmailNotFound)
 			}
 
+			// Safety check: ensure User is loaded
+			if authData.User == nil {
+				user, err := a.userRepo.GetByEmail(ctx, authData.UserEmail)
+				if err == nil && user.ID != "" {
+					authData.User = &user
+				} else {
+					// Log or handle error? For now, fail safe
+					return internal_err.InternalError("Failed to load user profile", err)
+				}
+			}
+
 			tokenPayload := requests.ToTokenPayload(authData)
 			pair, err := authentication.JWTAuth.GenerateTokenPair(tokenPayload, false)
 			if err != nil {

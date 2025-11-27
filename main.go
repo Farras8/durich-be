@@ -49,12 +49,20 @@ func main() {
 	lotRepo := repository.NewLotRepository(db)
 	lotService := services.NewLotService(lotRepo, buahRawRepo)
 
+	shipmentRepo := repository.NewShipmentRepository(db)
+	shipmentService := services.NewShipmentService(shipmentRepo)
+
+	salesRepo := repository.NewSalesRepository(db)
+	salesService := services.NewSalesService(salesRepo)
+
 	authController := controllers.NewAuthController(authService)
 	profileController := controllers.NewProfileController(profileService)
 	memberController := controllers.NewMemberController(memberService)
 	buahRawController := controllers.NewBuahRawController(buahRawService)
 	masterDataController := controllers.NewMasterDataController(masterDataService)
 	lotController := controllers.NewLotController(lotService)
+	shipmentController := controllers.NewShipmentController(shipmentService)
+	salesController := controllers.NewSalesController(salesService)
 
 	router := gin.Default()
 
@@ -72,6 +80,8 @@ func main() {
 	routes.RegisterBuahRaw(v1, buahRawController)
 	routes.RegisterMasterData(v1, masterDataController)
 	routes.RegisterLotRoutes(v1, lotController)
+	routes.RegisterShipment(v1, shipmentController)
+	routes.RegisterSales(v1, salesController)
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)
 	router.Run(":" + cfg.Server.Port)

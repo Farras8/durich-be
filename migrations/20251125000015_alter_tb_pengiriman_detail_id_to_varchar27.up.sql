@@ -1,0 +1,2 @@
+ALTER TABLE tb_pengiriman_detail ALTER COLUMN id DROP DEFAULT;
+ALTER TABLE tb_pengiriman_detail ALTER COLUMN id TYPE VARCHAR(27);

@@ -29,6 +29,7 @@ type LogoutRequest struct {
 // Internal Authentication DTOs
 type UserAuth struct {
 	AuthID         string            `json:"auth_id"`
+	UserID         string            `json:"user_id"`
 	Email          string            `json:"email"`
 	Role           []domain.UserRole `json:"role"`
 	RefreshTokenID string            `json:"refresh_token_id,omitempty"`
@@ -50,12 +51,15 @@ func (receiver CreateAuth) ToDomain() domain.Authentication {
 
 func ToTokenPayload(record domain.Authentication) UserAuth {
 	roles := []domain.UserRole{}
+	userID := ""
 	if record.User != nil {
 		roles = record.User.RoleSystem
+		userID = record.User.ID
 	}
 
 	return UserAuth{
 		AuthID:         record.ID,
+		UserID:         userID,
 		Email:          record.UserEmail,
 		Role:           roles,
 		RefreshTokenID: ksuid.New().String(),

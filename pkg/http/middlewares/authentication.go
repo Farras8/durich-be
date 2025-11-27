@@ -39,6 +39,7 @@ func TokenAuthMiddleware() gin.HandlerFunc {
 
 		c.Set(authentication.Token, requests.UserAuth{
 			AuthID:         accessToken.AuthID,
+			UserID:         accessToken.UserID,
 			Email:          accessToken.Email,
 			Role:           accessToken.Role,
 			RefreshTokenID: accessToken.RefreshTokenID,

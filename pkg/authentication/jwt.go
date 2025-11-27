@@ -84,6 +84,7 @@ func (m *JWTManager) generateAccessToken(auth requests.UserAuth) (string, error)
 	claims := &AccessTokenClaims{
 		UserAuth: requests.UserAuth{
 			AuthID:         auth.AuthID,
+			UserID:         auth.UserID,
 			Email:          auth.Email,
 			Role:           auth.Role,
 			RefreshTokenID: auth.RefreshTokenID,
