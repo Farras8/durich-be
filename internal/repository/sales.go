@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
 )
@@ -39,7 +40,7 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", "COMPLETED").
+		Set("status = ?", constants.ShipmentStatusCompleted).
 		Where("id = ?", sales.PengirimanID).
 		Exec(ctx)
 	if err != nil {
@@ -128,7 +129,7 @@ func (r *salesRepository) Delete(ctx context.Context, id string) error {
 	// Restore Shipment Status to OTW
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", "OTW").
+		Set("status = ?", constants.ShipmentStatusOTW).
 		Where("id = ?", sales.PengirimanID).
 		Exec(ctx)
 	if err != nil {

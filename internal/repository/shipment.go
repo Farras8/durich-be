@@ -2,17 +2,21 @@ package repository
 
 import (
 	"context"
+	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
 	"errors"
+
+	"github.com/uptrace/bun"
 )
 
 type ShipmentRepository interface {
 	Create(ctx context.Context, shipment *domain.Pengiriman) error
 	GetByID(ctx context.Context, id string) (*domain.Pengiriman, error)
-	GetList(ctx context.Context, tujuan, status string) ([]domain.Pengiriman, error)
+	GetList(ctx context.Context, tujuan, status string, page, limit int) ([]domain.Pengiriman, int64, error)
 	AddItem(ctx context.Context, detail *domain.PengirimanDetail) error
-	RemoveItem(ctx context.Context, detailID string) error
+	RemoveItem(ctx context.Context, shipmentID, detailID string) error
+	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
 	Finalize(ctx context.Context, id string) error
 	GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error)
 }
@@ -47,8 +51,9 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 	return shipment, nil
 }
 
-func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string) ([]domain.Pengiriman, error) {
+func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string, page, limit int) ([]domain.Pengiriman, int64, error) {
 	var shipments []domain.Pengiriman
+
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&shipments).
 		Relation("Details").
@@ -61,13 +66,20 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string)
 		query = query.Where("p.status = ?", status)
 	}
 
-	query = query.Order("p.created_at DESC")
-
-	err := query.Scan(ctx)
+	total, err := query.Count(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return shipments, nil
+
+	offset := (page - 1) * limit
+	query = query.Order("p.created_at DESC").Limit(limit).Offset(offset)
+
+	err = query.Scan(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return shipments, int64(total), nil
 }
 
 func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.PengirimanDetail) error {
@@ -77,33 +89,41 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 	}
 	defer tx.Rollback()
 
-	// Check Lot validity and stock
-	lot := new(domain.StokLot)
-	err = tx.NewSelect().Model(lot).Where("id = ?", detail.LotSumberID).For("UPDATE").Scan(ctx)
+	var shipmentStatus string
+	err = tx.NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("status").
+		Where("id = ?", detail.PengirimanID).
+		Where("deleted_at IS NULL").
+		Scan(ctx, &shipmentStatus)
 	if err != nil {
-		return err
+		return errors.New("shipment not found")
+	}
+	if shipmentStatus != constants.ShipmentStatusDraft {
+		return errors.New("shipment must be DRAFT to add items")
 	}
 
-	if lot.Status != "READY" {
-		return errors.New("lot status must be READY")
-	}
-	if lot.QtySisa < detail.QtyAmbil {
-		return errors.New("insufficient lot quantity")
-	}
-	if lot.BeratSisa < detail.BeratAmbil {
-		return errors.New("insufficient lot weight")
+	lot := new(domain.StokLot)
+	err = tx.NewSelect().
+		Model(lot).
+		Where("id = ?", detail.LotSumberID).
+		Where("status = ?", constants.LotStatusReady).
+		Where("qty_sisa >= ?", detail.QtyAmbil).
+		Where("berat_sisa >= ?", detail.BeratAmbil).
+		For("UPDATE").
+		Scan(ctx)
+	if err != nil {
+		return errors.New("lot not found, not in READY status, or insufficient quantity/weight")
 	}
 
-	// Insert Detail
 	_, err = tx.NewInsert().Model(detail).Exec(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Update Lot Stock
 	lot.QtySisa -= detail.QtyAmbil
 	lot.BeratSisa -= detail.BeratAmbil
-	
+
 	_, err = tx.NewUpdate().
 		Model(lot).
 		Column("qty_sisa", "berat_sisa").
@@ -116,25 +136,41 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 	return tx.Commit()
 }
 
-func (r *shipmentRepository) RemoveItem(ctx context.Context, detailID string) error {
+func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailID string) error {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Get Detail
+	var shipmentStatus string
+	err = tx.NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("status").
+		Where("id = ?", shipmentID).
+		Where("deleted_at IS NULL").
+		Scan(ctx, &shipmentStatus)
+	if err != nil {
+		return errors.New("shipment not found")
+	}
+	if shipmentStatus != constants.ShipmentStatusDraft {
+		return errors.New("shipment must be DRAFT to remove items")
+	}
+
 	detail := new(domain.PengirimanDetail)
 	err = tx.NewSelect().Model(detail).Where("id = ?", detailID).Scan(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Restore Lot Stock
+	if detail.PengirimanID != shipmentID {
+		return errors.New("detail does not belong to this shipment")
+	}
+
 	lot := new(domain.StokLot)
 	err = tx.NewSelect().Model(lot).Where("id = ?", detail.LotSumberID).For("UPDATE").Scan(ctx)
 	if err != nil {
-		return err // If lot deleted, this might fail, handle gracefully? Assuming soft delete only.
+		return err
 	}
 
 	lot.QtySisa += detail.QtyAmbil
@@ -149,13 +185,21 @@ func (r *shipmentRepository) RemoveItem(ctx context.Context, detailID string) er
 		return err
 	}
 
-	// Delete Detail
 	_, err = tx.NewDelete().Model(detail).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+func (r *shipmentRepository) UpdateStatus(ctx context.Context, id, status, notes, userID string) error {
+	_, err := r.db.InitQuery(ctx).NewUpdate().
+		Model((*domain.Pengiriman)(nil)).
+		Set("status = ?", status).
+		Where("id = ?", id).
+		Exec(ctx)
+	return err
 }
 
 func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
@@ -165,40 +209,42 @@ func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	// Update Shipment Status
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", "OTW").
+		Set("status = ?", constants.ShipmentStatusOTW).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Check if any lots are now empty (QtySisa == 0) and update their status to EMPTY
-	// Retrieve all lots involved in this shipment
 	var details []domain.PengirimanDetail
 	err = tx.NewSelect().Model(&details).Where("pengiriman_id = ?", id).Scan(ctx)
 	if err != nil {
 		return err
 	}
 
+	var emptyLotIDs []string
 	for _, d := range details {
 		lot := new(domain.StokLot)
 		err = tx.NewSelect().Model(lot).Where("id = ?", d.LotSumberID).Scan(ctx)
 		if err != nil {
 			return err
 		}
-		
+
 		if lot.QtySisa <= 0 {
-			_, err = tx.NewUpdate().
-				Model((*domain.StokLot)(nil)).
-				Set("status = ?", "EMPTY").
-				Where("id = ?", d.LotSumberID).
-				Exec(ctx)
-			if err != nil {
-				return err
-			}
+			emptyLotIDs = append(emptyLotIDs, d.LotSumberID)
+		}
+	}
+
+	if len(emptyLotIDs) > 0 {
+		_, err = tx.NewUpdate().
+			Model((*domain.StokLot)(nil)).
+			Set("status = ?", constants.LotStatusEmpty).
+			Where("id IN (?)", bun.In(emptyLotIDs)).
+			Exec(ctx)
+		if err != nil {
+			return err
 		}
 	}
 

@@ -55,6 +55,12 @@ func main() {
 	salesRepo := repository.NewSalesRepository(db)
 	salesService := services.NewSalesService(salesRepo)
 
+	dashboardRepo := repository.NewDashboardRepository(db)
+	dashboardService := services.NewDashboardService(dashboardRepo)
+
+	traceabilityRepo := repository.NewTraceabilityRepository(db)
+	traceabilityService := services.NewTraceabilityService(traceabilityRepo)
+
 	authController := controllers.NewAuthController(authService)
 	profileController := controllers.NewProfileController(profileService)
 	memberController := controllers.NewMemberController(memberService)
@@ -63,6 +69,8 @@ func main() {
 	lotController := controllers.NewLotController(lotService)
 	shipmentController := controllers.NewShipmentController(shipmentService)
 	salesController := controllers.NewSalesController(salesService)
+	dashboardController := controllers.NewDashboardController(dashboardService)
+	traceabilityController := controllers.NewTraceabilityController(traceabilityService)
 
 	router := gin.Default()
 
@@ -82,6 +90,8 @@ func main() {
 	routes.RegisterLotRoutes(v1, lotController)
 	routes.RegisterShipment(v1, shipmentController)
 	routes.RegisterSales(v1, salesController)
+	routes.RegisterDashboard(v1, dashboardController)
+	routes.RegisterTraceability(v1, traceabilityController)
 
 	log.Printf("Server starting on port %s", cfg.Server.Port)
 	router.Run(":" + cfg.Server.Port)

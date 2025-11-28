@@ -35,6 +35,7 @@ type LotDetail struct {
 	BuahRawID  string    `bun:",pk" json:"buah_raw_id"`
 	CreatedAt  time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 
+	Lot     *StokLot `bun:"rel:belongs-to,join:lot_id=id" json:"lot,omitempty"`
 	BuahRaw *BuahRaw `bun:"rel:belongs-to,join:buah_raw_id=id" json:"buah_raw,omitempty"`
 }
 

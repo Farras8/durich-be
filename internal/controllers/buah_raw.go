@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
@@ -50,14 +51,94 @@ func (c *BuahRawController) BulkCreate(ctx *gin.Context) {
 		return
 	}
 
-	response.SendSuccess(ctx, http.StatusCreated, "Berhasil menyimpan data panen", gin.H{"inserted_ids": ids})
+	response.SendSuccess(ctx, http.StatusCreated, "Berhasil menyimpan data panen", gin.H{
+		"inserted_ids":   ids,
+		"total_inserted": len(ids),
+	})
 }
 
 func (c *BuahRawController) GetList(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "10"))
 
-	filter := map[string]interface{}{}
+	filter := c.buildFilter(ctx)
+	filter["include_relations"] = c.parseIncludeRelations(ctx.Query("include"))
+
+	res, err := c.service.GetList(ctx.Request.Context(), filter, limit, page)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusOK, "Success", res)
+}
+
+func (c *BuahRawController) GetUnsorted(ctx *gin.Context) {
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "50"))
+
+	filter := c.buildFilter(ctx)
+	filter["include_relations"] = c.parseIncludeRelations(ctx.Query("include"))
+
+	res, err := c.service.GetUnsorted(ctx.Request.Context(), filter, limit, page)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusOK, "Unsorted fruits retrieved successfully", res)
+}
+
+func (c *BuahRawController) GetDetail(ctx *gin.Context) {
+	id := ctx.Param("id")
+	
+	res, err := c.service.GetDetail(ctx.Request.Context(), id)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+	
+	response.SendSuccess(ctx, http.StatusOK, "Success", res)
+}
+
+func (c *BuahRawController) Update(ctx *gin.Context) {
+	id := ctx.Param("id")
+	
+	var req requests.BuahRawUpdateRequest
+	if err := utils.BindData(ctx, &req); err != nil {
+		response.SendError(ctx, errors.ValidationErrorToAppError(err))
+		return
+	}
+
+	err := c.service.Update(ctx.Request.Context(), id, req)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+	
+	response.SendSuccess(ctx, http.StatusOK, "Berhasil update data buah", nil)
+}
+
+func (c *BuahRawController) Delete(ctx *gin.Context) {
+	id := ctx.Param("id")
+	
+	err := c.service.Delete(ctx.Request.Context(), id)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+	
+	response.SendSuccess(ctx, http.StatusOK, "Data buah berhasil dihapus", nil)
+}
+
+func (c *BuahRawController) ClearCache(ctx *gin.Context) {
+	c.service.ClearJenisCache()
+	response.SendSuccess(ctx, http.StatusOK, "Cache cleared successfully", nil)
+}
+
+func (c *BuahRawController) buildFilter(ctx *gin.Context) map[string]interface{} {
+	filter := make(map[string]interface{})
+
 	if v := ctx.Query("tgl_panen"); v != "" {
 		filter["tgl_panen"] = v
 	}
@@ -72,47 +153,32 @@ func (c *BuahRawController) GetList(ctx *gin.Context) {
 		filter["is_sorted"] = b
 	}
 
-	res, err := c.service.GetList(ctx.Request.Context(), filter, limit, page)
-	if err != nil {
-		response.SendError(ctx, err)
-		return
-	}
-
-	response.SendSuccess(ctx, http.StatusOK, "Success", res)
+	return filter
 }
 
-func (c *BuahRawController) GetDetail(ctx *gin.Context) {
-	id := ctx.Param("id")
-	res, err := c.service.GetDetail(ctx.Request.Context(), id)
-	if err != nil {
-		response.SendError(ctx, err)
-		return
-	}
-	response.SendSuccess(ctx, http.StatusOK, "Success", res)
-}
-
-func (c *BuahRawController) Update(ctx *gin.Context) {
-	id := ctx.Param("id")
-	var req requests.BuahRawUpdateRequest
-	if err := utils.BindData(ctx, &req); err != nil {
-		response.SendError(ctx, errors.ValidationErrorToAppError(err))
-		return
+func (c *BuahRawController) parseIncludeRelations(include string) map[string]bool {
+	if include == "" {
+		return nil
 	}
 
-	err := c.service.Update(ctx.Request.Context(), id, req)
-	if err != nil {
-		response.SendError(ctx, err)
-		return
-	}
-	response.SendSuccess(ctx, http.StatusOK, "Berhasil update data buah", nil)
-}
+	relations := make(map[string]bool)
+	parts := strings.Split(include, ",")
 
-func (c *BuahRawController) Delete(ctx *gin.Context) {
-	id := ctx.Param("id")
-	err := c.service.Delete(ctx.Request.Context(), id)
-	if err != nil {
-		response.SendError(ctx, err)
-		return
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		switch part {
+		case "jenis", "blok", "pohon", "all":
+			relations[part] = true
+		}
 	}
-	response.SendSuccess(ctx, http.StatusOK, "Data buah berhasil dihapus", nil)
+
+	if relations["all"] {
+		return map[string]bool{
+			"jenis": true,
+			"blok":  true,
+			"pohon": true,
+		}
+	}
+
+	return relations
 }

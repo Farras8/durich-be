@@ -58,6 +58,7 @@ func (m *Authentication) BeforeAppendModel(_ context.Context, query bun.Query) e
 		if m.ID == "" {
 			m.ID = ksuid.New().String()
 		}
+		m.CreatedAt = time.Now()
 	case *bun.UpdateQuery:
 		m.UpdatedAt = time.Now()
 	}

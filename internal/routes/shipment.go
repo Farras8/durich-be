@@ -19,4 +19,10 @@ func RegisterShipment(router *gin.RouterGroup, ctl *controllers.ShipmentControll
 		group.DELETE("/:id/items", ctl.RemoveItem)
 		group.POST("/:id/finalize", ctl.Finalize)
 	}
+
+	salesGroup := router.Group("/shipments")
+	salesGroup.Use(middlewares.TokenAuthMiddleware(), middlewares.RoleHandler(domain.RoleAdmin, domain.RoleSales))
+	{
+		salesGroup.PATCH("/:id/status", ctl.UpdateStatus)
+	}
 }

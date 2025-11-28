@@ -7,8 +7,7 @@ import (
 	"durich-be/internal/dto/response"
 	"durich-be/internal/repository"
 	"fmt"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/segmentio/ksuid"
@@ -18,17 +17,23 @@ type BuahRawService interface {
 	Create(ctx context.Context, req requests.BuahRawCreateRequest) (string, error)
 	BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]string, error)
 	GetList(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error)
+	GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error)
 	GetDetail(ctx context.Context, id string) (response.BuahRawResponse, error)
 	Update(ctx context.Context, id string, req requests.BuahRawUpdateRequest) error
 	Delete(ctx context.Context, id string) error
+	ClearJenisCache()
 }
 
 type buahRawService struct {
-	repo repository.BuahRawRepository
+	repo       repository.BuahRawRepository
+	jenisCache sync.Map
+	mu         sync.Mutex
 }
 
 func NewBuahRawService(repo repository.BuahRawRepository) BuahRawService {
-	return &buahRawService{repo: repo}
+	return &buahRawService{
+		repo: repo,
+	}
 }
 
 func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateRequest) (string, error) {
@@ -37,24 +42,17 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	jenis, err := s.repo.GetJenisDurianByID(ctx, req.JenisDurianID)
+	jenis, err := s.getJenisDurianCached(ctx, req.JenisDurianID)
 	if err != nil {
 		return "", fmt.Errorf("jenis durian tidak ditemukan: %v", err)
 	}
 
-	lastKode, _ := s.repo.GetLastKodeByJenis(ctx, jenis.Kode)
-
-	currentSequence := 0
-	if lastKode != "" {
-		parts := strings.Split(lastKode, "-")
-		if len(parts) == 2 {
-			currentSequence, _ = strconv.Atoi(parts[1])
-		}
+	sequence, err := s.repo.GetNextSequenceWithLock(ctx, jenis.Kode)
+	if err != nil {
+		return "", fmt.Errorf("gagal generate sequence: %v", err)
 	}
 
-	currentSequence++
-	newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, currentSequence)
-
+	newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, sequence)
 	newID := ksuid.New().String()
 	now := time.Now()
 
@@ -79,54 +77,30 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 }
 
 func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]string, error) {
-	var buahToInsert []domain.BuahRaw
-	var insertedIDs []string
 	tglPanen := req.TglPanen
 	if tglPanen == "" {
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	for _, item := range req.Items {
-		jenis, err := s.repo.GetJenisDurianByID(ctx, item.JenisDurianID)
-		if err != nil {
-			return nil, fmt.Errorf("jenis durian tidak ditemukan: %v", err)
-		}
-
-
-		lastKode, _ := s.repo.GetLastKodeByJenis(ctx, jenis.Kode)
-		
-		currentSequence := 0
-		if lastKode != "" {
-			parts := strings.Split(lastKode, "-")
-			if len(parts) == 2 {
-				currentSequence, _ = strconv.Atoi(parts[1])
-			}
-		}
-
-
-		for i := 0; i < item.Jumlah; i++ {
-			currentSequence++
-			newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, currentSequence)
-			
-			newID := ksuid.New().String()
-			now := time.Now()
-
-			buah := domain.BuahRaw{
-				ID:          newID,
-				KodeBuah:    newKodeBuah,
-				JenisDurian: item.JenisDurianID, 
-				BlokPanen:   req.BlokPanenID,    
-				PohonPanen:  item.PohonPanenID,
-				TglPanen:    tglPanen,
-				IsSorted:    false,
-				CreatedAt:   now,
-				UpdatedAt:   now,
-			}
-			
-			buahToInsert = append(buahToInsert, buah)
-			insertedIDs = append(insertedIDs, newID)
-		}
+	jenisIDs := s.extractUniqueJenisIDs(req.Items)
+	jenisMap, err := s.getJenisDurianBatch(ctx, jenisIDs)
+	if err != nil {
+		return nil, fmt.Errorf("gagal mengambil data jenis durian: %v", err)
 	}
+
+	sequenceMap := make(map[string]int)
+	s.mu.Lock()
+	for kode := range s.collectJenisCodes(jenisMap) {
+		sequence, err := s.repo.GetNextSequenceWithLock(ctx, kode)
+		if err != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("gagal generate sequence untuk %s: %v", kode, err)
+		}
+		sequenceMap[kode] = sequence
+	}
+	s.mu.Unlock()
+
+	buahToInsert, insertedIDs := s.buildBuahRawList(req, jenisMap, sequenceMap, tglPanen)
 
 	if len(buahToInsert) > 0 {
 		err := s.repo.BulkCreate(ctx, buahToInsert)
@@ -138,6 +112,113 @@ func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBul
 	return insertedIDs, nil
 }
 
+func (s *buahRawService) extractUniqueJenisIDs(items []requests.BuahRawBulkCreateItem) []string {
+	uniqueMap := make(map[string]bool)
+	for _, item := range items {
+		uniqueMap[item.JenisDurianID] = true
+	}
+
+	jenisIDs := make([]string, 0, len(uniqueMap))
+	for id := range uniqueMap {
+		jenisIDs = append(jenisIDs, id)
+	}
+	return jenisIDs
+}
+
+func (s *buahRawService) getJenisDurianBatch(ctx context.Context, ids []string) (map[string]domain.JenisDurian, error) {
+	uncachedIDs := make([]string, 0)
+	result := make(map[string]domain.JenisDurian)
+
+	for _, id := range ids {
+		if cached, ok := s.jenisCache.Load(id); ok {
+			result[id] = cached.(domain.JenisDurian)
+		} else {
+			uncachedIDs = append(uncachedIDs, id)
+		}
+	}
+
+	if len(uncachedIDs) > 0 {
+		fetched, err := s.repo.GetJenisDurianByIDs(ctx, uncachedIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for id, jenis := range fetched {
+			s.jenisCache.Store(id, jenis)
+			result[id] = jenis
+		}
+	}
+
+	if len(result) != len(ids) {
+		return nil, fmt.Errorf("beberapa jenis durian tidak ditemukan")
+	}
+
+	return result, nil
+}
+
+func (s *buahRawService) collectJenisCodes(jenisMap map[string]domain.JenisDurian) map[string]bool {
+	codes := make(map[string]bool)
+	for _, jenis := range jenisMap {
+		codes[jenis.Kode] = true
+	}
+	return codes
+}
+
+func (s *buahRawService) buildBuahRawList(
+	req requests.BuahRawBulkCreateRequest,
+	jenisMap map[string]domain.JenisDurian,
+	sequenceMap map[string]int,
+	tglPanen string,
+) ([]domain.BuahRaw, []string) {
+	var buahToInsert []domain.BuahRaw
+	var insertedIDs []string
+	now := time.Now()
+
+	for _, item := range req.Items {
+		jenis := jenisMap[item.JenisDurianID]
+		currentSeq := sequenceMap[jenis.Kode]
+
+		for i := 0; i < item.Jumlah; i++ {
+			newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, currentSeq)
+			newID := ksuid.New().String()
+
+			buah := domain.BuahRaw{
+				ID:          newID,
+				KodeBuah:    newKodeBuah,
+				JenisDurian: item.JenisDurianID,
+				BlokPanen:   req.BlokPanenID,
+				PohonPanen:  item.PohonPanenID,
+				TglPanen:    tglPanen,
+				IsSorted:    false,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+
+			buahToInsert = append(buahToInsert, buah)
+			insertedIDs = append(insertedIDs, newID)
+			currentSeq++
+		}
+
+		sequenceMap[jenis.Kode] = currentSeq
+	}
+
+	return buahToInsert, insertedIDs
+}
+
+func (s *buahRawService) getJenisDurianCached(ctx context.Context, id string) (domain.JenisDurian, error) {
+	if cached, ok := s.jenisCache.Load(id); ok {
+		return cached.(domain.JenisDurian), nil
+	}
+
+	jenis, err := s.repo.GetJenisDurianByID(ctx, id)
+	if err != nil {
+		return jenis, err
+	}
+
+	s.jenisCache.Store(id, jenis)
+	return jenis, nil
+}
+
 func (s *buahRawService) GetList(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error) {
 	offset := (page - 1) * limit
 	list, count, err := s.repo.GetList(ctx, filter, limit, offset)
@@ -145,7 +226,30 @@ func (s *buahRawService) GetList(ctx context.Context, filter map[string]interfac
 		return response.PaginationResponse{}, err
 	}
 
-	var data []response.BuahRawResponse
+	data := make([]response.BuahRawResponse, 0, len(list))
+	for _, item := range list {
+		data = append(data, s.mapToResponse(item))
+	}
+
+	return response.PaginationResponse{
+		Data: data,
+		Meta: response.PaginationMeta{
+			Page:      page,
+			Limit:     limit,
+			TotalData: count,
+			TotalPage: (count + limit - 1) / limit,
+		},
+	}, nil
+}
+
+func (s *buahRawService) GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error) {
+	offset := (page - 1) * limit
+	list, count, err := s.repo.GetUnsorted(ctx, filter, limit, offset)
+	if err != nil {
+		return response.PaginationResponse{}, err
+	}
+
+	data := make([]response.BuahRawResponse, 0, len(list))
 	for _, item := range list {
 		data = append(data, s.mapToResponse(item))
 	}
@@ -194,6 +298,8 @@ func (s *buahRawService) Update(ctx context.Context, id string, req requests.Bua
 		item.JenisDurian = req.JenisDurianID
 	}
 
+	item.UpdatedAt = time.Now()
+
 	return s.repo.Update(ctx, &item)
 }
 
@@ -201,68 +307,75 @@ func (s *buahRawService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *buahRawService) mapToResponse(item domain.BuahRaw) response.BuahRawResponse {
-	kodeLengkap := ""
-	blokID := ""
-	blokNama := ""
-	divisiNama := ""
-	estateNama := ""
-	companyNama := ""
+func (s *buahRawService) ClearJenisCache() {
+	s.jenisCache = sync.Map{}
+}
 
-	if item.BlokPanenDetail != nil {
-		blokID = item.BlokPanenDetail.ID
-		blokNama = item.BlokPanenDetail.NamaBlok
-		if item.BlokPanenDetail.Divisi != nil {
-			divisiNama = item.BlokPanenDetail.Divisi.Nama
-			if item.BlokPanenDetail.Divisi.Estate != nil {
-				estateNama = item.BlokPanenDetail.Divisi.Estate.Nama
-				if item.BlokPanenDetail.Divisi.Estate.Company != nil {
-					companyNama = item.BlokPanenDetail.Divisi.Estate.Company.Nama
-					kodeLengkap = fmt.Sprintf("%s-%s-%s-%s",
-						item.BlokPanenDetail.Divisi.Estate.Company.Kode,
-						item.BlokPanenDetail.Divisi.Estate.Kode,
-						item.BlokPanenDetail.Divisi.Kode,
-						item.BlokPanenDetail.Kode,
-					)
-				}
+func (s *buahRawService) mapToResponse(item domain.BuahRaw) response.BuahRawResponse {
+	resp := response.BuahRawResponse{
+		ID:          item.ID,
+		KodeBuah:    item.KodeBuah,
+		JenisDurian: s.buildJenisDetail(item.JenisDurianDetail),
+		LokasiPanen: s.buildLokasiPanen(item.BlokPanenDetail),
+		PohonPanen:  s.buildPohonKode(item.PohonPanenDetail, item.PohonPanen),
+		TglPanen:    item.TglPanen,
+		IsSorted:    item.IsSorted,
+		CreatedAt:   item.CreatedAt.Format(time.RFC3339),
+	}
+
+	return resp
+}
+
+func (s *buahRawService) buildJenisDetail(detail *domain.JenisDurian) response.JenisDurianDetail {
+	if detail == nil {
+		return response.JenisDurianDetail{}
+	}
+
+	return response.JenisDurianDetail{
+		ID:   detail.ID,
+		Kode: detail.Kode,
+		Nama: detail.NamaJenis,
+	}
+}
+
+func (s *buahRawService) buildLokasiPanen(blok *domain.Blok) response.LokasiPanen {
+	lokasi := response.LokasiPanen{}
+
+	if blok == nil {
+		return lokasi
+	}
+
+	lokasi.BlokID = blok.ID
+	lokasi.BlokNama = blok.NamaBlok
+
+	if blok.Divisi != nil {
+		lokasi.DivisiNama = blok.Divisi.Nama
+
+		if blok.Divisi.Estate != nil {
+			lokasi.EstateNama = blok.Divisi.Estate.Nama
+
+			if blok.Divisi.Estate.Company != nil {
+				lokasi.CompanyNama = blok.Divisi.Estate.Company.Nama
+				lokasi.KodeLengkap = fmt.Sprintf("%s-%s-%s-%s",
+					blok.Divisi.Estate.Company.Kode,
+					blok.Divisi.Estate.Kode,
+					blok.Divisi.Kode,
+					blok.Kode,
+				)
 			}
 		}
 	}
 
-	jenisDetail := response.JenisDurianDetail{}
-	if item.JenisDurianDetail != nil {
-		jenisDetail = response.JenisDurianDetail{
-			ID:   item.JenisDurianDetail.ID,
-			Kode: item.JenisDurianDetail.Kode,
-			Nama: item.JenisDurianDetail.NamaJenis,
-		}
-	}
+	return lokasi
+}
 
-	var pohonKode *string
-	if item.PohonPanenDetail != nil {
-		k := item.PohonPanenDetail.Kode
-		pohonKode = &k
-	} else if item.PohonPanen != nil {
-		// fallback if detail is nil but id is there? 
-		// usually means not loaded or not found
-		pohonKode = nil
+func (s *buahRawService) buildPohonKode(detail *domain.Pohon, pohonPanen *string) *string {
+	if detail != nil {
+		k := detail.Kode
+		return &k
 	}
-
-	return response.BuahRawResponse{
-		ID:          item.ID,
-		KodeBuah:    item.KodeBuah,
-		JenisDurian: jenisDetail,
-		LokasiPanen: response.LokasiPanen{
-			KodeLengkap: kodeLengkap,
-			BlokID:      blokID,
-			BlokNama:    blokNama,
-			DivisiNama:  divisiNama,
-			EstateNama:  estateNama,
-			CompanyNama: companyNama,
-		},
-		PohonPanen: pohonKode,
-		TglPanen:   item.TglPanen,
-		IsSorted:   item.IsSorted,
-		CreatedAt:  item.CreatedAt.Format(time.RFC3339),
+	if pohonPanen != nil {
+		return nil
 	}
+	return nil
 }

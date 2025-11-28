@@ -34,7 +34,8 @@ type PengirimanDetail struct {
 	BeratAmbil    float64   `bun:",notnull" json:"berat_ambil"`
 	CreatedAt     time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 
-	Lot *StokLot `bun:"rel:belongs-to,join:lot_sumber_id=id" json:"lot,omitempty"`
+	Pengiriman *Pengiriman `bun:"rel:belongs-to,join:pengiriman_id=id" json:"pengiriman,omitempty"`
+	Lot        *StokLot    `bun:"rel:belongs-to,join:lot_sumber_id=id" json:"lot,omitempty"`
 }
 
 func (p *PengirimanDetail) BeforeAppendModel(_ context.Context, query bun.Query) error {

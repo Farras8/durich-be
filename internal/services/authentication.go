@@ -24,10 +24,7 @@ type AuthService interface {
 	RegisterSales(ctx context.Context, payload requests.RegisterAdmin) (res response.RegisterResponse, err error)
 	Login(ctx context.Context, payload requests.Login) (res response.LoginResponse, err error)
 	Logout(ctx context.Context) (err error)
-	RefreshToken(
-		ctx context.Context,
-		payload requests.RefreshToken,
-	) (res response.RefreshTokenResponse, err error)
+	RefreshToken(ctx context.Context, payload requests.RefreshToken) (res response.RefreshTokenResponse, err error)
 }
 
 type authService struct {
@@ -172,15 +169,8 @@ func (a *authService) Login(
 				return internal_err.AuthError(constants.AuthPasswordInvalidOrEmailNotFound)
 			}
 
-			// Safety check: ensure User is loaded
 			if authData.User == nil {
-				user, err := a.userRepo.GetByEmail(ctx, authData.UserEmail)
-				if err == nil && user.ID != "" {
-					authData.User = &user
-				} else {
-					// Log or handle error? For now, fail safe
-					return internal_err.InternalError("Failed to load user profile", err)
-				}
+				return internal_err.InternalError("Failed to load user profile", nil)
 			}
 
 			tokenPayload := requests.ToTokenPayload(authData)
@@ -212,33 +202,21 @@ func (a *authService) Login(
 }
 
 func (a *authService) Logout(ctx context.Context) (err error) {
-	err = database.RunInTx(
-		ctx,
-		database.GetDB(),
-		&sql.TxOptions{},
-		func(ctx context.Context, tx bun.Tx) error {
-			authToken := authentication.GetUserDataFromToken(ctx)
-			if authToken.AuthID == "" {
-				return internal_err.AuthError(constants.DataNotFound)
-			}
+	authToken := authentication.GetUserDataFromToken(ctx)
+	if authToken.AuthID == "" {
+		return internal_err.AuthError(constants.DataNotFound)
+	}
 
-			authData, err := a.authRepo.GetByID(ctx, &authToken.AuthID, nil)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return internal_err.AuthError(constants.DataNotFound)
-				}
-				return err
-			}
+	authData, err := a.authRepo.GetByID(ctx, authToken.AuthID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return internal_err.AuthError(constants.DataNotFound)
+		}
+		return err
+	}
 
-			authData.RefreshTokenID = nil
-			err = a.authRepo.Update(ctx, &authData)
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
-	)
+	authData.RefreshTokenID = nil
+	err = a.authRepo.Update(ctx, &authData)
 	if err != nil {
 		return err
 	}
@@ -258,7 +236,7 @@ func (a *authService) RefreshToken(
 		return res, internal_err.AuthError(constants.AuthInvalidToken)
 	}
 
-	auth, err := a.authRepo.GetByID(ctx, nil, &claims.TokenID)
+	auth, err := a.authRepo.GetByRefreshTokenID(ctx, claims.TokenID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return res, internal_err.AuthError(constants.DataNotFound)

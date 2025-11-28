@@ -19,4 +19,10 @@ func RegisterBuahRaw(router *gin.RouterGroup, ctl controllers.BuahRawController)
 		group.PUT("/:id", ctl.Update)
 		group.DELETE("/:id", ctl.Delete)
 	}
+
+	unsortedGroup := router.Group("/buah-raw/unsorted")
+	unsortedGroup.Use(middlewares.TokenAuthMiddleware(), middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse))
+	{
+		unsortedGroup.GET("", ctl.GetUnsorted)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"durich-be/pkg/http/response"
 	"durich-be/pkg/utils"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,13 +47,24 @@ func (c *ShipmentController) GetList(ctx *gin.Context) {
 	tujuan := ctx.Query("tujuan")
 	status := ctx.Query("status")
 
-	res, err := c.service.GetList(ctx.Request.Context(), tujuan, status)
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
+
+	res, total, err := c.service.GetList(ctx.Request.Context(), tujuan, status, page, limit)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
 	}
 
-	response.SendSuccess(ctx, http.StatusOK, "Shipments retrieved successfully", res)
+	response.SendSuccess(ctx, http.StatusOK, "Shipments retrieved successfully", gin.H{
+		"data": res,
+		"pagination": gin.H{
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"total_page": (total + int64(limit) - 1) / int64(limit),
+		},
+	})
 }
 
 func (c *ShipmentController) GetByID(ctx *gin.Context) {
@@ -96,6 +108,28 @@ func (c *ShipmentController) RemoveItem(ctx *gin.Context) {
 	}
 
 	response.SendSuccess(ctx, http.StatusOK, "Item removed successfully", nil)
+}
+
+func (c *ShipmentController) UpdateStatus(ctx *gin.Context) {
+	id := ctx.Param("id")
+	var req requests.ShipmentUpdateStatusRequest
+	if err := utils.BindData(ctx, &req); err != nil {
+		response.SendError(ctx, errors.ValidationErrorToAppError(err))
+		return
+	}
+
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	if userAuth.UserID == "" {
+		response.SendError(ctx, errors.AuthError("Invalid token: missing user_id"))
+		return
+	}
+
+	if err := c.service.UpdateStatus(ctx.Request.Context(), id, req, userAuth.UserID); err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusOK, "Shipment status updated successfully", nil)
 }
 
 func (c *ShipmentController) Finalize(ctx *gin.Context) {

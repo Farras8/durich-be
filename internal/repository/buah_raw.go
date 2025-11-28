@@ -5,6 +5,8 @@ import (
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
 	"fmt"
+
+	"github.com/uptrace/bun"
 )
 
 type BuahRawRepository interface {
@@ -12,12 +14,15 @@ type BuahRawRepository interface {
 	Create(ctx context.Context, data *domain.BuahRaw) error
 	GetLastKodeByJenis(ctx context.Context, kodeJenis string) (string, error)
 	GetJenisDurianByID(ctx context.Context, id string) (domain.JenisDurian, error)
+	GetJenisDurianByIDs(ctx context.Context, ids []string) (map[string]domain.JenisDurian, error)
 	GetBlokFullDetail(ctx context.Context, blokID string) (domain.Blok, domain.Divisi, domain.Estate, domain.Company, error)
 	GetList(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error)
+	GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error)
 	GetByID(ctx context.Context, id string) (domain.BuahRaw, error)
 	Update(ctx context.Context, data *domain.BuahRaw) error
 	Delete(ctx context.Context, id string) error
 	GetLotDetails(ctx context.Context, lotID string) ([]domain.BuahRaw, error)
+	GetNextSequenceWithLock(ctx context.Context, kodeJenis string) (int, error)
 }
 
 type buahRawRepository struct {
@@ -29,15 +34,25 @@ func NewBuahRawRepository(db *database.Database) BuahRawRepository {
 }
 
 func (r *buahRawRepository) BulkCreate(ctx context.Context, data []domain.BuahRaw) error {
+	const batchSize = 1000
+
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	_, err = tx.NewInsert().Model(&data).Exec(ctx)
-	if err != nil {
-		return err
+	for i := 0; i < len(data); i += batchSize {
+		end := i + batchSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		batch := data[i:end]
+		_, err = tx.NewInsert().Model(&batch).Exec(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -45,31 +60,74 @@ func (r *buahRawRepository) BulkCreate(ctx context.Context, data []domain.BuahRa
 
 func (r *buahRawRepository) GetList(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error) {
 	var list []domain.BuahRaw
-	q := r.db.InitQuery(ctx).NewSelect().Model(&list).
-		Relation("JenisDurianDetail").
-		Relation("BlokPanenDetail").
-		Relation("BlokPanenDetail.Divisi").
-		Relation("BlokPanenDetail.Divisi.Estate").
-		Relation("BlokPanenDetail.Divisi.Estate.Company").
-		Relation("PohonPanenDetail").
-		Where("buah_raw.deleted_at IS NULL").
-		Order("buah_raw.created_at DESC")
+	q := r.db.InitQuery(ctx).NewSelect().Model(&list)
 
-	if val, ok := filter["tgl_panen"].(string); ok && val != "" {
-		q.Where("buah_raw.tgl_panen = ?", val)
-	}
-	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
-		q.Where("buah_raw.blok_panen = ?", val)
-	}
-	if val, ok := filter["jenis_durian_id"].(string); ok && val != "" {
-		q.Where("buah_raw.jenis_durian = ?", val)
-	}
-	if val, ok := filter["is_sorted"]; ok {
-		q.Where("buah_raw.is_sorted = ?", val)
-	}
+	q = r.applyRelations(q, filter)
+	q = r.applyFilters(q, filter)
+	q = q.Where("buah_raw.deleted_at IS NULL").
+		Order("buah_raw.created_at DESC")
 
 	count, err := q.Limit(limit).Offset(offset).ScanAndCount(ctx)
 	return list, count, err
+}
+
+func (r *buahRawRepository) GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error) {
+	var list []domain.BuahRaw
+	q := r.db.InitQuery(ctx).NewSelect().Model(&list)
+
+	q = r.applyRelations(q, filter)
+	q = r.applyFilters(q, filter)
+	q = q.Where("buah_raw.deleted_at IS NULL").
+		Where("buah_raw.is_sorted = false").
+		Order("buah_raw.created_at DESC")
+
+	count, err := q.Limit(limit).Offset(offset).ScanAndCount(ctx)
+	return list, count, err
+}
+
+func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string]interface{}) *bun.SelectQuery {
+	includeRelations, ok := filter["include_relations"].(map[string]bool)
+	if !ok || len(includeRelations) == 0 {
+		return q.
+			Relation("JenisDurianDetail").
+			Relation("BlokPanenDetail").
+			Relation("BlokPanenDetail.Divisi").
+			Relation("BlokPanenDetail.Divisi.Estate").
+			Relation("BlokPanenDetail.Divisi.Estate.Company").
+			Relation("PohonPanenDetail")
+	}
+
+	if includeRelations["jenis"] {
+		q = q.Relation("JenisDurianDetail")
+	}
+	if includeRelations["blok"] {
+		q = q.Relation("BlokPanenDetail").
+			Relation("BlokPanenDetail.Divisi").
+			Relation("BlokPanenDetail.Divisi.Estate").
+			Relation("BlokPanenDetail.Divisi.Estate.Company")
+	}
+	if includeRelations["pohon"] {
+		q = q.Relation("PohonPanenDetail")
+	}
+
+	return q
+}
+
+func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]interface{}) *bun.SelectQuery {
+	if val, ok := filter["tgl_panen"].(string); ok && val != "" {
+		q = q.Where("buah_raw.tgl_panen = ?", val)
+	}
+	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
+		q = q.Where("buah_raw.blok_panen = ?", val)
+	}
+	if val, ok := filter["jenis_durian_id"].(string); ok && val != "" {
+		q = q.Where("buah_raw.jenis_durian = ?", val)
+	}
+	if val, ok := filter["is_sorted"]; ok {
+		q = q.Where("buah_raw.is_sorted = ?", val)
+	}
+
+	return q
 }
 
 func (r *buahRawRepository) GetByID(ctx context.Context, id string) (domain.BuahRaw, error) {
@@ -108,8 +166,6 @@ func (r *buahRawRepository) Create(ctx context.Context, data *domain.BuahRaw) er
 
 func (r *buahRawRepository) GetLastKodeByJenis(ctx context.Context, kodeJenis string) (string, error) {
 	var buah domain.BuahRaw
-	// Cari kode buah terakhir yang diawali dengan kodeJenis (misal "MK-")
-	// Order by kode_buah desc limit 1
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&buah).
 		Column("kode_buah").
@@ -119,9 +175,42 @@ func (r *buahRawRepository) GetLastKodeByJenis(ctx context.Context, kodeJenis st
 		Scan(ctx)
 
 	if err != nil {
-		return "", err // Bisa jadi belum ada data, handle di service
+		return "", err
 	}
 	return buah.KodeBuah, nil
+}
+
+func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, kodeJenis string) (int, error) {
+	tx, err := r.db.InitQuery(ctx).Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var buah domain.BuahRaw
+	err = tx.NewSelect().
+		Model(&buah).
+		Column("kode_buah").
+		Where("kode_buah LIKE ?", fmt.Sprintf("%s-%%", kodeJenis)).
+		Order("kode_buah DESC").
+		Limit(1).
+		For("UPDATE").
+		Scan(ctx)
+
+	sequence := 1
+	if err == nil && buah.KodeBuah != "" {
+		var lastSeq int
+		_, err = fmt.Sscanf(buah.KodeBuah, kodeJenis+"-%d", &lastSeq)
+		if err == nil {
+			sequence = lastSeq + 1
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return sequence, nil
 }
 
 func (r *buahRawRepository) GetJenisDurianByID(ctx context.Context, id string) (domain.JenisDurian, error) {
@@ -133,14 +222,29 @@ func (r *buahRawRepository) GetJenisDurianByID(ctx context.Context, id string) (
 	return jenis, err
 }
 
+func (r *buahRawRepository) GetJenisDurianByIDs(ctx context.Context, ids []string) (map[string]domain.JenisDurian, error) {
+	var jenisList []domain.JenisDurian
+	err := r.db.InitQuery(ctx).NewSelect().
+		Model(&jenisList).
+		Where("id IN (?)", bun.In(ids)).
+		Scan(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]domain.JenisDurian, len(jenisList))
+	for _, j := range jenisList {
+		result[j.ID] = j
+	}
+	return result, nil
+}
+
 func (r *buahRawRepository) GetBlokFullDetail(ctx context.Context, blokID string) (domain.Blok, domain.Divisi, domain.Estate, domain.Company, error) {
 	var blok domain.Blok
 	var divisi domain.Divisi
 	var estate domain.Estate
 	var company domain.Company
-
-	// Manual Join karena saya belum tahu setup relation Bun di project ini
-	// Cara aman: Query bertingkat atau Join manual
 
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&blok).
@@ -150,17 +254,26 @@ func (r *buahRawRepository) GetBlokFullDetail(ctx context.Context, blokID string
 		return blok, divisi, estate, company, err
 	}
 
-	err = r.db.InitQuery(ctx).NewSelect().Model(&divisi).Where("id = ?", blok.DivisiID).Scan(ctx)
+	err = r.db.InitQuery(ctx).NewSelect().
+		Model(&divisi).
+		Where("id = ?", blok.DivisiID).
+		Scan(ctx)
 	if err != nil {
 		return blok, divisi, estate, company, err
 	}
 
-	err = r.db.InitQuery(ctx).NewSelect().Model(&estate).Where("id = ?", divisi.EstateID).Scan(ctx)
+	err = r.db.InitQuery(ctx).NewSelect().
+		Model(&estate).
+		Where("id = ?", divisi.EstateID).
+		Scan(ctx)
 	if err != nil {
 		return blok, divisi, estate, company, err
 	}
 
-	err = r.db.InitQuery(ctx).NewSelect().Model(&company).Where("id = ?", estate.CompanyID).Scan(ctx)
+	err = r.db.InitQuery(ctx).NewSelect().
+		Model(&company).
+		Where("id = ?", estate.CompanyID).
+		Scan(ctx)
 
 	return blok, divisi, estate, company, err
 }

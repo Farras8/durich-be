@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/dto/response"
@@ -12,10 +13,11 @@ import (
 
 type ShipmentService interface {
 	Create(ctx context.Context, req requests.ShipmentCreateRequest, userID string) (*response.ShipmentResponse, error)
-	GetList(ctx context.Context, tujuan, status string) ([]response.ShipmentResponse, error)
+	GetList(ctx context.Context, tujuan, status string, page, limit int) ([]response.ShipmentResponse, int64, error)
 	GetByID(ctx context.Context, id string) (*response.ShipmentDetailResponse, error)
 	AddItem(ctx context.Context, shipmentID string, req requests.ShipmentAddItemRequest) error
 	RemoveItem(ctx context.Context, shipmentID string, detailID string) error
+	UpdateStatus(ctx context.Context, shipmentID string, req requests.ShipmentUpdateStatusRequest, userID string) error
 	Finalize(ctx context.Context, id string) error
 }
 
@@ -28,6 +30,9 @@ func NewShipmentService(repo repository.ShipmentRepository) ShipmentService {
 }
 
 func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreateRequest, userID string) (*response.ShipmentResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	tglKirim := req.TglKirim
 	if tglKirim.IsZero() {
 		tglKirim = time.Now()
@@ -36,7 +41,7 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	shipment := &domain.Pengiriman{
 		Tujuan:    req.Tujuan,
 		TglKirim:  tglKirim,
-		Status:    "DRAFT",
+		Status:    constants.ShipmentStatusDraft,
 		CreatedBy: userID,
 	}
 
@@ -48,20 +53,33 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	return &resp, nil
 }
 
-func (s *shipmentService) GetList(ctx context.Context, tujuan, status string) ([]response.ShipmentResponse, error) {
-	shipments, err := s.repo.GetList(ctx, tujuan, status)
+func (s *shipmentService) GetList(ctx context.Context, tujuan, status string, page, limit int) ([]response.ShipmentResponse, int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	shipments, total, err := s.repo.GetList(ctx, tujuan, status, page, limit)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var resps []response.ShipmentResponse
 	for _, p := range shipments {
 		resps = append(resps, response.NewShipmentResponse(&p))
 	}
-	return resps, nil
+	return resps, total, nil
 }
 
 func (s *shipmentService) GetByID(ctx context.Context, id string) (*response.ShipmentDetailResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	p, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -90,13 +108,8 @@ func (s *shipmentService) GetByID(ctx context.Context, id string) (*response.Shi
 }
 
 func (s *shipmentService) AddItem(ctx context.Context, shipmentID string, req requests.ShipmentAddItemRequest) error {
-	shipment, err := s.repo.GetByID(ctx, shipmentID)
-	if err != nil {
-		return err
-	}
-	if shipment.Status != "DRAFT" {
-		return errors.ValidationError("shipment must be DRAFT to add items")
-	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	detail := &domain.PengirimanDetail{
 		PengirimanID: shipmentID,
@@ -109,32 +122,56 @@ func (s *shipmentService) AddItem(ctx context.Context, shipmentID string, req re
 }
 
 func (s *shipmentService) RemoveItem(ctx context.Context, shipmentID string, detailID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	return s.repo.RemoveItem(ctx, shipmentID, detailID)
+}
+
+func (s *shipmentService) UpdateStatus(ctx context.Context, shipmentID string, req requests.ShipmentUpdateStatusRequest, userID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	shipment, err := s.repo.GetByID(ctx, shipmentID)
 	if err != nil {
 		return err
 	}
-	if shipment.Status != "DRAFT" {
-		return errors.ValidationError("shipment must be DRAFT to remove items")
+
+	currentStatus := shipment.Status
+	newStatus := req.Status
+
+	isValidTransition := false
+	switch currentStatus {
+	case constants.ShipmentStatusDraft:
+		if newStatus == constants.ShipmentStatusOTW {
+			isValidTransition = true
+		}
+	case constants.ShipmentStatusOTW:
+		if newStatus == constants.ShipmentStatusReceived {
+			isValidTransition = true
+		}
+	case constants.ShipmentStatusReceived:
+		if newStatus == constants.ShipmentStatusCompleted {
+			isValidTransition = true
+		}
 	}
 
-	
-	detail, err := s.repo.GetDetailByID(ctx, detailID)
-	if err != nil {
-		return err
-	}
-	if detail.PengirimanID != shipmentID {
-		return errors.ValidationError("detail does not belong to this shipment")
+	if !isValidTransition {
+		return errors.ValidationError("invalid status transition from " + currentStatus + " to " + newStatus)
 	}
 
-	return s.repo.RemoveItem(ctx, detailID)
+	return s.repo.UpdateStatus(ctx, shipmentID, newStatus, req.Notes, userID)
 }
 
 func (s *shipmentService) Finalize(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	shipment, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if shipment.Status != "DRAFT" {
+	if shipment.Status != constants.ShipmentStatusDraft {
 		return errors.ValidationError("shipment must be DRAFT to finalize")
 	}
 	if len(shipment.Details) == 0 {

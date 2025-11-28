@@ -1,6 +1,8 @@
 package requests
 
-import "time"
+import (
+	"time"
+)
 
 type ShipmentCreateRequest struct {
 	Tujuan   string    `json:"tujuan" binding:"required"`
@@ -15,4 +17,9 @@ type ShipmentAddItemRequest struct {
 
 type ShipmentRemoveItemRequest struct {
 	DetailID string `json:"detail_id" binding:"required"`
+}
+
+type ShipmentUpdateStatusRequest struct {
+	Status string `json:"status" binding:"required"`
+	Notes  string `json:"notes"`
 }

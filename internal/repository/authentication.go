@@ -4,13 +4,16 @@ import (
 	"context"
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
+
+	"github.com/uptrace/bun"
 )
 
 type AuthenticationRepository interface {
 	Create(ctx context.Context, auth *domain.Authentication) error
 	GetByEmail(ctx context.Context, email string) (domain.Authentication, error)
 	GetByUserEmail(ctx context.Context, userEmail string) (domain.Authentication, error)
-	GetByID(ctx context.Context, id, ksuid *string) (domain.Authentication, error)
+	GetByID(ctx context.Context, id string) (domain.Authentication, error)
+	GetByRefreshTokenID(ctx context.Context, tokenID string) (domain.Authentication, error)
 	Update(ctx context.Context, auth *domain.Authentication) error
 }
 
@@ -31,8 +34,11 @@ func (r *authenticationRepository) GetByEmail(ctx context.Context, email string)
 	var data domain.Authentication
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&data).
+		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
+		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Column("id", "email", "role_system")
+		}).
 		Where("user_email = ?", email).
-		Relation("User").
 		Scan(ctx)
 	return data, err
 }
@@ -41,27 +47,38 @@ func (r *authenticationRepository) GetByUserEmail(ctx context.Context, userEmail
 	var data domain.Authentication
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&data).
+		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
+		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Column("id", "email", "role_system")
+		}).
 		Where("user_email = ?", userEmail).
-		Relation("User").
 		Scan(ctx)
 	return data, err
 }
 
-func (r *authenticationRepository) GetByID(ctx context.Context, id, ksuid *string) (domain.Authentication, error) {
+func (r *authenticationRepository) GetByID(ctx context.Context, id string) (domain.Authentication, error) {
 	var data domain.Authentication
-	q := r.db.InitQuery(ctx).NewSelect().
+	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&data).
-		Relation("User")
+		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
+		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Column("id", "email", "role_system")
+		}).
+		Where("authentication.id = ?", id).
+		Scan(ctx)
+	return data, err
+}
 
-	if id != nil {
-		q.Where("authentication.id = ?", id)
-	}
-
-	if ksuid != nil {
-		q.Where("authentication.refresh_token_id = ?", ksuid)
-	}
-
-	err := q.Scan(ctx)
+func (r *authenticationRepository) GetByRefreshTokenID(ctx context.Context, tokenID string) (domain.Authentication, error) {
+	var data domain.Authentication
+	err := r.db.InitQuery(ctx).NewSelect().
+		Model(&data).
+		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
+		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Column("id", "email", "role_system")
+		}).
+		Where("authentication.refresh_token_id = ?", tokenID).
+		Scan(ctx)
 	return data, err
 }
 
@@ -70,6 +87,7 @@ func (r *authenticationRepository) Update(ctx context.Context, auth *domain.Auth
 		NewUpdate().
 		Model(auth).
 		Where("id = ?", auth.ID).
+		ExcludeColumn("created_at").
 		Returning("id").
 		Exec(ctx)
 	return err

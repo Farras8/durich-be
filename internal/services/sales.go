@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/dto/response"
@@ -31,7 +32,7 @@ func (s *salesService) Create(ctx context.Context, req requests.SalesCreateReque
 	if err != nil {
 		return nil, err
 	}
-	if shipment.Status != "OTW" {
+	if shipment.Status != constants.ShipmentStatusOTW {
 		return nil, errors.ValidationError("shipment status must be OTW")
 	}
 

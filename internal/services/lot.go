@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/dto/response"
@@ -35,7 +36,7 @@ func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest) 
 	lot := &domain.StokLot{
 		JenisDurian: req.JenisDurianID,
 		KondisiBuah: req.KondisiBuah,
-		Status:      "DRAFT",
+		Status:      constants.LotStatusDraft,
 	}
 
 	err := s.lotRepo.Create(ctx, lot)
@@ -157,7 +158,7 @@ func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.Lo
 		return nil, err
 	}
 
-	if lot.Status != "DRAFT" {
+	if lot.Status != constants.LotStatusDraft {
 		return nil, errors.New("hanya lot dengan status DRAFT yang bisa ditambahkan item")
 	}
 
@@ -197,7 +198,7 @@ func (s *lotService) RemoveItem(ctx context.Context, lotID string, req requests.
 		return err
 	}
 
-	if lot.Status != "DRAFT" {
+	if lot.Status != constants.LotStatusDraft {
 		return errors.New("hanya lot dengan status DRAFT yang bisa dikurangi item")
 	}
 
@@ -210,7 +211,7 @@ func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.Lo
 		return nil, err
 	}
 
-	if lot.Status != "DRAFT" {
+	if lot.Status != constants.LotStatusDraft {
 		return nil, errors.New("hanya lot dengan status DRAFT yang bisa difinalisasi")
 	}
 
@@ -227,7 +228,7 @@ func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.Lo
 	lot.QtyAwal = count
 	lot.BeratSisa = req.BeratAwal
 	lot.QtySisa = count
-	lot.Status = "READY"
+	lot.Status = constants.LotStatusReady
 
 	err = s.lotRepo.Update(ctx, lot)
 	if err != nil {
