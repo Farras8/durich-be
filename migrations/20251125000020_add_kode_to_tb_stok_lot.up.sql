@@ -1,0 +1,1 @@
+ALTER TABLE tb_stok_lot ADD COLUMN kode TEXT ;

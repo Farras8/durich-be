@@ -211,7 +211,7 @@ func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
 
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", constants.ShipmentStatusOTW).
+		Set("status = ?", constants.ShipmentStatusSending).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

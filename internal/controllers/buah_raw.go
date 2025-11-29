@@ -29,13 +29,13 @@ func (c *BuahRawController) Create(ctx *gin.Context) {
 		return
 	}
 
-	id, err := c.service.Create(ctx.Request.Context(), req)
+	res, err := c.service.Create(ctx.Request.Context(), req)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
 	}
 
-	response.SendSuccess(ctx, http.StatusCreated, "Berhasil menyimpan data panen", gin.H{"id": id})
+	response.SendSuccess(ctx, http.StatusCreated, "Berhasil menyimpan data panen", res)
 }
 
 func (c *BuahRawController) BulkCreate(ctx *gin.Context) {
@@ -45,15 +45,15 @@ func (c *BuahRawController) BulkCreate(ctx *gin.Context) {
 		return
 	}
 
-	ids, err := c.service.BulkCreate(ctx.Request.Context(), req)
+	res, err := c.service.BulkCreate(ctx.Request.Context(), req)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
 	}
 
 	response.SendSuccess(ctx, http.StatusCreated, "Berhasil menyimpan data panen", gin.H{
-		"inserted_ids":   ids,
-		"total_inserted": len(ids),
+		"items":          res,
+		"total_inserted": len(res),
 	})
 }
 
@@ -147,6 +147,9 @@ func (c *BuahRawController) buildFilter(ctx *gin.Context) map[string]interface{}
 	}
 	if v := ctx.Query("jenis_durian_id"); v != "" {
 		filter["jenis_durian_id"] = v
+	}
+	if v := ctx.Query("kode_buah"); v != "" {
+		filter["kode_buah"] = v
 	}
 	if v := ctx.Query("is_sorted"); v != "" {
 		b, _ := strconv.ParseBool(v)

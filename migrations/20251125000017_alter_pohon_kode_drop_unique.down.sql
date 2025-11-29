@@ -1,0 +1,1 @@
+ALTER TABLE pohon ADD CONSTRAINT pohon_kode_key UNIQUE (kode);

@@ -126,10 +126,10 @@ func (r *salesRepository) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	// Restore Shipment Status to OTW
+	// Restore Shipment Status to SENDING
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", constants.ShipmentStatusOTW).
+		Set("status = ?", constants.ShipmentStatusSending).
 		Where("id = ?", sales.PengirimanID).
 		Exec(ctx)
 	if err != nil {

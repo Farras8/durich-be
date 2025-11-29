@@ -250,13 +250,25 @@ func (r *masterDataRepository) CreatePohon(ctx context.Context, pohon *domain.Po
 
 func (r *masterDataRepository) GetPohonList(ctx context.Context) ([]domain.Pohon, error) {
 	var pohonList []domain.Pohon
-	err := r.db.InitQuery(ctx).NewSelect().Model(&pohonList).Where("deleted_at IS NULL").Scan(ctx)
+	err := r.db.InitQuery(ctx).NewSelect().Model(&pohonList).
+		Relation("Blok").
+		Relation("Blok.Divisi").
+		Relation("Blok.Divisi.Estate").
+		Relation("Blok.Divisi.Estate.Company").
+		Where("pohon.deleted_at IS NULL").
+		Scan(ctx)
 	return pohonList, err
 }
 
 func (r *masterDataRepository) GetPohonByID(ctx context.Context, id string) (*domain.Pohon, error) {
 	pohon := &domain.Pohon{}
-	err := r.db.InitQuery(ctx).NewSelect().Model(pohon).Where("id = ? AND deleted_at IS NULL", id).Scan(ctx)
+	err := r.db.InitQuery(ctx).NewSelect().Model(pohon).
+		Relation("Blok").
+		Relation("Blok.Divisi").
+		Relation("Blok.Divisi.Estate").
+		Relation("Blok.Divisi.Estate.Company").
+		Where("pohon.id = ? AND pohon.deleted_at IS NULL", id).
+		Scan(ctx)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

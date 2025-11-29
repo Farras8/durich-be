@@ -376,7 +376,7 @@ func (s *masterDataService) GetBloks(ctx context.Context, divisiID string) ([]re
 	for _, b := range bloks {
 		kodeLengkap := ""
 		if b.Divisi != nil && b.Divisi.Estate != nil && b.Divisi.Estate.Company != nil {
-			kodeLengkap = fmt.Sprintf("%s-%s-%s-%s",
+			kodeLengkap = fmt.Sprintf("%s%s%s%s",
 				b.Divisi.Estate.Company.Kode,
 				b.Divisi.Estate.Kode,
 				b.Divisi.Kode,
@@ -416,10 +416,10 @@ func (s *masterDataService) GetBlokByID(ctx context.Context, id string) (*respon
 	if blok == nil {
 		return nil, errors.New("blok not found")
 	}
-	
+
 	kodeLengkap := ""
 	if blok.Divisi != nil && blok.Divisi.Estate != nil && blok.Divisi.Estate.Company != nil {
-		kodeLengkap = fmt.Sprintf("%s-%s-%s-%s",
+		kodeLengkap = fmt.Sprintf("%s%s%s%s",
 			blok.Divisi.Estate.Company.Kode,
 			blok.Divisi.Estate.Kode,
 			blok.Divisi.Kode,
@@ -558,8 +558,9 @@ func (s *masterDataService) DeleteJenisDurian(ctx context.Context, id string) er
 
 func (s *masterDataService) CreatePohon(ctx context.Context, req requests.PohonCreateRequest) (*response.PohonResponse, error) {
 	pohon := &domain.Pohon{
-		Kode: req.Kode,
-		Nama: req.Nama,
+		Kode:   req.Kode,
+		Nama:   req.Nama,
+		BlokID: req.BlokID,
 	}
 	err := s.repo.CreatePohon(ctx, pohon)
 	if err != nil {
@@ -569,6 +570,7 @@ func (s *masterDataService) CreatePohon(ctx context.Context, req requests.PohonC
 		ID:        pohon.ID,
 		Kode:      pohon.Kode,
 		Nama:      pohon.Nama,
+		BlokID:    pohon.BlokID,
 		CreatedAt: pohon.CreatedAt,
 		UpdatedAt: pohon.UpdatedAt,
 	}, nil
@@ -581,12 +583,25 @@ func (s *masterDataService) GetPohonList(ctx context.Context) ([]response.PohonR
 	}
 	result := make([]response.PohonResponse, 0, len(pohonList))
 	for _, p := range pohonList {
+		kodeLengkap := ""
+		if p.Blok != nil && p.Blok.Divisi != nil && p.Blok.Divisi.Estate != nil && p.Blok.Divisi.Estate.Company != nil {
+			kodeLengkap = fmt.Sprintf("%s%s%s%s%s",
+				p.Blok.Divisi.Estate.Company.Kode,
+				p.Blok.Divisi.Estate.Kode,
+				p.Blok.Divisi.Kode,
+				p.Blok.Kode,
+				p.Kode,
+			)
+		}
+
 		result = append(result, response.PohonResponse{
-			ID:        p.ID,
-			Kode:      p.Kode,
-			Nama:      p.Nama,
-			CreatedAt: p.CreatedAt,
-			UpdatedAt: p.UpdatedAt,
+			ID:          p.ID,
+			Kode:        p.Kode,
+			Nama:        p.Nama,
+			KodeLengkap: kodeLengkap,
+			BlokID:      p.BlokID,
+			CreatedAt:   p.CreatedAt,
+			UpdatedAt:   p.UpdatedAt,
 		})
 	}
 	return result, nil
@@ -600,12 +615,26 @@ func (s *masterDataService) GetPohonByID(ctx context.Context, id string) (*respo
 	if pohon == nil {
 		return nil, errors.New("pohon not found")
 	}
+
+	kodeLengkap := ""
+	if pohon.Blok != nil && pohon.Blok.Divisi != nil && pohon.Blok.Divisi.Estate != nil && pohon.Blok.Divisi.Estate.Company != nil {
+		kodeLengkap = fmt.Sprintf("%s%s%s%s%s",
+			pohon.Blok.Divisi.Estate.Company.Kode,
+			pohon.Blok.Divisi.Estate.Kode,
+			pohon.Blok.Divisi.Kode,
+			pohon.Blok.Kode,
+			pohon.Kode,
+		)
+	}
+
 	return &response.PohonResponse{
-		ID:        pohon.ID,
-		Kode:      pohon.Kode,
-		Nama:      pohon.Nama,
-		CreatedAt: pohon.CreatedAt,
-		UpdatedAt: pohon.UpdatedAt,
+		ID:          pohon.ID,
+		Kode:        pohon.Kode,
+		Nama:        pohon.Nama,
+		KodeLengkap: kodeLengkap,
+		BlokID:      pohon.BlokID,
+		CreatedAt:   pohon.CreatedAt,
+		UpdatedAt:   pohon.UpdatedAt,
 	}, nil
 }
 
@@ -618,6 +647,7 @@ func (s *masterDataService) UpdatePohon(ctx context.Context, id string, req requ
 		return nil, errors.New("pohon not found")
 	}
 	existing.Nama = req.Nama
+	existing.BlokID = req.BlokID
 	err = s.repo.UpdatePohon(ctx, id, existing)
 	if err != nil {
 		return nil, err
@@ -626,6 +656,7 @@ func (s *masterDataService) UpdatePohon(ctx context.Context, id string, req requ
 		ID:        existing.ID,
 		Kode:      existing.Kode,
 		Nama:      existing.Nama,
+		BlokID:    existing.BlokID,
 		CreatedAt: existing.CreatedAt,
 		UpdatedAt: existing.UpdatedAt,
 	}, nil

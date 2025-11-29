@@ -40,3 +40,13 @@ func (c *DashboardController) GetSalesDashboard(ctx *gin.Context) {
 
 	response.SendSuccess(ctx, http.StatusOK, "Sales dashboard retrieved successfully", res)
 }
+
+func (c *DashboardController) GetWarehouseData(ctx *gin.Context) {
+	res, err := c.service.GetWarehouseData(ctx.Request.Context())
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusOK, "Warehouse data retrieved successfully", res)
+}

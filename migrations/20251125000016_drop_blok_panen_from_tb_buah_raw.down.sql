@@ -1,0 +1,1 @@
+ALTER TABLE tb_buah_raw ADD COLUMN blok_panen VARCHAR(3) NOT NULL;

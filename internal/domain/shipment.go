@@ -14,7 +14,7 @@ type Pengiriman struct {
 	ID        string     `bun:",pk" json:"id"`
 	Tujuan    string     `bun:",notnull" json:"tujuan"`
 	TglKirim  time.Time  `bun:",notnull" json:"tgl_kirim"`
-	Status    string     `bun:",default:'OTW'" json:"status"`
+	Status    string     `bun:",default:'SENT'" json:"status"`
 	CreatedBy string     `bun:",notnull" json:"created_by"`
 	CreatedAt time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
@@ -27,12 +27,12 @@ type Pengiriman struct {
 type PengirimanDetail struct {
 	bun.BaseModel `bun:"table:tb_pengiriman_detail,alias:pd"`
 
-	ID            string    `bun:",pk" json:"id"`
-	PengirimanID  string    `bun:",notnull" json:"pengiriman_id"`
-	LotSumberID   string    `bun:",notnull" json:"lot_sumber_id"`
-	QtyAmbil      int       `bun:",notnull" json:"qty_ambil"`
-	BeratAmbil    float64   `bun:",notnull" json:"berat_ambil"`
-	CreatedAt     time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
+	ID           string    `bun:",pk" json:"id"`
+	PengirimanID string    `bun:",notnull" json:"pengiriman_id"`
+	LotSumberID  string    `bun:",notnull" json:"lot_sumber_id"`
+	QtyAmbil     int       `bun:",notnull" json:"qty_ambil"`
+	BeratAmbil   float64   `bun:",notnull" json:"berat_ambil"`
+	CreatedAt    time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 
 	Pengiriman *Pengiriman `bun:"rel:belongs-to,join:pengiriman_id=id" json:"pengiriman,omitempty"`
 	Lot        *StokLot    `bun:"rel:belongs-to,join:lot_sumber_id=id" json:"lot,omitempty"`

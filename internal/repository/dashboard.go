@@ -11,6 +11,7 @@ import (
 type DashboardRepository interface {
 	GetStokDashboard(ctx context.Context, dateFrom, dateTo time.Time) (*response.DashboardStokResponse, error)
 	GetSalesDashboard(ctx context.Context, dateFrom, dateTo time.Time) (*response.DashboardSalesResponse, error)
+	GetWarehouseData(ctx context.Context) (*response.WarehouseDataResponse, error)
 }
 
 type dashboardRepository struct {
@@ -535,4 +536,94 @@ func (r *dashboardRepository) getSalesTopBuyers(ctx context.Context, dateFrom, d
 	}
 
 	return topBuyers, nil
+}
+
+func (r *dashboardRepository) GetWarehouseData(ctx context.Context) (*response.WarehouseDataResponse, error) {
+	var (
+		totalBuahRawToday int
+		totalLotReady     int
+		totalLotSent      int
+	)
+
+	today := time.Now().Format("2006-01-02")
+
+	var wg sync.WaitGroup
+	errC := make(chan error, 3)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		count, err := r.db.NewSelect().
+			Table("tb_buah_raw").
+			Where("tgl_panen = ?", today).
+			Where("deleted_at IS NULL").
+			Count(ctx)
+		if err != nil {
+			errC <- err
+			return
+		}
+		totalBuahRawToday = count
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		count, err := r.db.NewSelect().
+			Table("tb_stok_lot").
+			Where("status = ?", "READY").
+			Where("deleted_at IS NULL").
+			Count(ctx)
+		if err != nil {
+			errC <- err
+			return
+		}
+		totalLotReady = count
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Count unique lots that are in shipments created today (or overall sent, depends on req)
+		// Request says "total lot yang statusnya sent" in the context of "warehouse-data" which usually implies current snapshot or today's activity.
+		// "total buah raw HARI INI", so likely "total lot sent HARI INI".
+		// But the field name is total_lot_sent, while total_buah_raw_today has "today".
+		// Let's assume "Today" for consistency with the first metric, OR "Total Sent ever"?
+		// Usually dashboard widgets show:
+		// 1. Buah Raw Today (Daily input)
+		// 2. Stock Ready (Current Inventory Snapshot)
+		// 3. Stock Sent (Today's Output) -> This makes the most sense for a daily dashboard flow.
+		
+		// Query: Count distinct lot_sumber_id from tb_pengiriman_detail 
+		// JOIN tb_pengiriman ON detail.pengiriman_id = pengiriman.id
+		// WHERE pengiriman.created_at = today AND pengiriman.deleted_at IS NULL
+		
+		count, err := r.db.NewSelect().
+			ColumnExpr("COUNT(DISTINCT pd.lot_sumber_id)").
+			TableExpr("tb_pengiriman_detail AS pd").
+			Join("JOIN tb_pengiriman AS p ON pd.pengiriman_id = p.id").
+			Where("DATE(p.created_at) = ?", today).
+			Where("p.deleted_at IS NULL").
+			Count(ctx)
+			
+		if err != nil {
+			errC <- err
+			return
+		}
+		totalLotSent = count
+	}()
+
+	wg.Wait()
+	close(errC)
+
+	for err := range errC {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &response.WarehouseDataResponse{
+		TotalBuahRawToday: totalBuahRawToday,
+		TotalLotReady:     totalLotReady,
+		TotalLotSent:      totalLotSent,
+	}, nil
 }

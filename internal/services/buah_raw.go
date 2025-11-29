@@ -14,8 +14,8 @@ import (
 )
 
 type BuahRawService interface {
-	Create(ctx context.Context, req requests.BuahRawCreateRequest) (string, error)
-	BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]string, error)
+	Create(ctx context.Context, req requests.BuahRawCreateRequest) (response.BuahRawResponse, error)
+	BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]response.BuahRawResponse, error)
 	GetList(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error)
 	GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, page int) (response.PaginationResponse, error)
 	GetDetail(ctx context.Context, id string) (response.BuahRawResponse, error)
@@ -36,32 +36,51 @@ func NewBuahRawService(repo repository.BuahRawRepository) BuahRawService {
 	}
 }
 
-func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateRequest) (string, error) {
+func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateRequest) (response.BuahRawResponse, error) {
 	tglPanen := req.TglPanen
 	if tglPanen == "" {
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	jenis, err := s.getJenisDurianCached(ctx, req.JenisDurianID)
-	if err != nil {
-		return "", fmt.Errorf("jenis durian tidak ditemukan: %v", err)
+	// Default pohon ID logic
+	pohonPanenID := req.PohonPanenID
+	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
+	if pohonPanenID == nil || *pohonPanenID == "" {
+		pohonPanenID = &defaultPohonID
 	}
 
-	sequence, err := s.repo.GetNextSequenceWithLock(ctx, jenis.Kode)
+	// Get pohon with full hierarchy (Company -> Estate -> Divisi -> Blok -> Pohon)
+	pohon, err := s.repo.GetPohonWithFullHierarchy(ctx, *pohonPanenID)
 	if err != nil {
-		return "", fmt.Errorf("gagal generate sequence: %v", err)
+		return response.BuahRawResponse{}, fmt.Errorf("pohon tidak ditemukan: %v", err)
 	}
 
-	newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, sequence)
+	// Build prefix from location hierarchy
+	prefix := s.buildLocationPrefix(pohon)
+	if prefix == "" {
+		return response.BuahRawResponse{}, fmt.Errorf("gagal membuat prefix lokasi: data hierarki tidak lengkap")
+	}
+
+	// Get next sequence for this location prefix
+	sequence, err := s.repo.GetNextSequenceWithLock(ctx, prefix, tglPanen)
+	if err != nil {
+		return response.BuahRawResponse{}, fmt.Errorf("gagal generate sequence: %v", err)
+	}
+
+	newKodeBuah := fmt.Sprintf("%s-F%05d", prefix, sequence)
 	newID := ksuid.New().String()
 	now := time.Now()
+
+	jenisDurian, err := s.getJenisDurianCached(ctx, req.JenisDurianID)
+	if err != nil {
+		return response.BuahRawResponse{}, fmt.Errorf("jenis durian tidak ditemukan: %v", err)
+	}
 
 	buah := domain.BuahRaw{
 		ID:          newID,
 		KodeBuah:    newKodeBuah,
 		JenisDurian: req.JenisDurianID,
-		BlokPanen:   req.BlokPanenID,
-		PohonPanen:  req.PohonPanenID,
+		PohonPanen:  pohonPanenID,
 		TglPanen:    tglPanen,
 		IsSorted:    false,
 		CreatedAt:   now,
@@ -70,37 +89,56 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 
 	err = s.repo.Create(ctx, &buah)
 	if err != nil {
-		return "", err
+		return response.BuahRawResponse{}, err
 	}
 
-	return newID, nil
+	// Manually attach relations to return full response without re-querying
+	buah.JenisDurianDetail = &jenisDurian
+	buah.PohonPanenDetail = pohon
+
+	return s.mapToResponse(buah), nil
 }
 
-func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]string, error) {
+func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBulkCreateRequest) ([]response.BuahRawResponse, error) {
 	tglPanen := req.TglPanen
 	if tglPanen == "" {
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	jenisIDs := s.extractUniqueJenisIDs(req.Items)
+	// Extract unique pohon IDs and fetch their hierarchies
+	pohonIDs := s.extractUniquePohonIDs(req.Items)
+	pohonMap, err := s.getPohonBatchWithHierarchy(ctx, pohonIDs)
+	if err != nil {
+		return nil, fmt.Errorf("gagal mengambil data pohon: %v", err)
+	}
+
+	// Build prefix map from pohon
+	prefixMap := s.buildPrefixMap(pohonMap)
+
+	// Get sequences for all prefixes
+	sequenceMap := make(map[string]int)
+	s.mu.Lock()
+	for prefix := range s.collectUniquePrefixes(prefixMap) {
+		sequence, err := s.repo.GetNextSequenceWithLock(ctx, prefix, tglPanen)
+		if err != nil {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("gagal generate sequence untuk %s: %v", prefix, err)
+		}
+		sequenceMap[prefix] = sequence
+	}
+	s.mu.Unlock()
+
+	// Get jenis durian details for response mapping
+	jenisIDs := make([]string, 0)
+	for _, item := range req.Items {
+		jenisIDs = append(jenisIDs, item.JenisDurianID)
+	}
 	jenisMap, err := s.getJenisDurianBatch(ctx, jenisIDs)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil data jenis durian: %v", err)
 	}
 
-	sequenceMap := make(map[string]int)
-	s.mu.Lock()
-	for kode := range s.collectJenisCodes(jenisMap) {
-		sequence, err := s.repo.GetNextSequenceWithLock(ctx, kode)
-		if err != nil {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("gagal generate sequence untuk %s: %v", kode, err)
-		}
-		sequenceMap[kode] = sequence
-	}
-	s.mu.Unlock()
-
-	buahToInsert, insertedIDs := s.buildBuahRawList(req, jenisMap, sequenceMap, tglPanen)
+	buahToInsert, insertedIDs := s.buildBuahRawListFromLocation(req, prefixMap, sequenceMap, tglPanen)
 
 	if len(buahToInsert) > 0 {
 		err := s.repo.BulkCreate(ctx, buahToInsert)
@@ -109,22 +147,83 @@ func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBul
 		}
 	}
 
-	return insertedIDs, nil
+	// Map inserted items to full response
+	result := make([]response.BuahRawResponse, 0, len(buahToInsert))
+	for i, b := range buahToInsert {
+		// Attach loaded relations
+		if b.PohonPanen != nil {
+			b.PohonPanenDetail = pohonMap[*b.PohonPanen]
+		}
+		if jenis, ok := jenisMap[b.JenisDurian]; ok {
+			// create copy to assign address
+			j := jenis
+			b.JenisDurianDetail = &j
+		}
+		// Re-assign ID since it was generated in buildBuahRawListFromLocation but not in original struct passed to repo if repo modifies it (ksuid is string so ok)
+		// Wait, buahToInsert has IDs already generated.
+		
+		// Ensure we use the ID from the inserted list if needed, but buildBuahRawListFromLocation sets it.
+		b.ID = insertedIDs[i] 
+		
+		result = append(result, s.mapToResponse(b))
+	}
+
+	return result, nil
 }
 
-func (s *buahRawService) extractUniqueJenisIDs(items []requests.BuahRawBulkCreateItem) []string {
+func (s *buahRawService) extractUniquePohonIDs(items []requests.BuahRawBulkCreateItem) []string {
 	uniqueMap := make(map[string]bool)
+	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
+	
 	for _, item := range items {
-		uniqueMap[item.JenisDurianID] = true
+		pohonID := defaultPohonID
+		if item.PohonPanenID != nil && *item.PohonPanenID != "" {
+			pohonID = *item.PohonPanenID
+		}
+		uniqueMap[pohonID] = true
 	}
 
-	jenisIDs := make([]string, 0, len(uniqueMap))
+	pohonIDs := make([]string, 0, len(uniqueMap))
 	for id := range uniqueMap {
-		jenisIDs = append(jenisIDs, id)
+		pohonIDs = append(pohonIDs, id)
 	}
-	return jenisIDs
+	return pohonIDs
 }
 
+func (s *buahRawService) getPohonBatchWithHierarchy(ctx context.Context, ids []string) (map[string]*domain.Pohon, error) {
+	result := make(map[string]*domain.Pohon)
+
+	for _, id := range ids {
+		pohon, err := s.repo.GetPohonWithFullHierarchy(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("pohon %s tidak ditemukan: %v", id, err)
+		}
+		result[id] = pohon
+	}
+
+	return result, nil
+}
+
+func (s *buahRawService) buildPrefixMap(pohonMap map[string]*domain.Pohon) map[string]string {
+	prefixMap := make(map[string]string)
+	for pohonID, pohon := range pohonMap {
+		prefix := s.buildLocationPrefix(pohon)
+		prefixMap[pohonID] = prefix
+	}
+	return prefixMap
+}
+
+func (s *buahRawService) collectUniquePrefixes(prefixMap map[string]string) map[string]bool {
+	prefixes := make(map[string]bool)
+	for _, prefix := range prefixMap {
+		if prefix != "" {
+			prefixes[prefix] = true
+		}
+	}
+	return prefixes
+}
+
+// Keep for backward compatibility (still used in Update method)
 func (s *buahRawService) getJenisDurianBatch(ctx context.Context, ids []string) (map[string]domain.JenisDurian, error) {
 	uncachedIDs := make([]string, 0)
 	result := make(map[string]domain.JenisDurian)
@@ -156,38 +255,40 @@ func (s *buahRawService) getJenisDurianBatch(ctx context.Context, ids []string) 
 	return result, nil
 }
 
-func (s *buahRawService) collectJenisCodes(jenisMap map[string]domain.JenisDurian) map[string]bool {
-	codes := make(map[string]bool)
-	for _, jenis := range jenisMap {
-		codes[jenis.Kode] = true
-	}
-	return codes
-}
-
-func (s *buahRawService) buildBuahRawList(
+func (s *buahRawService) buildBuahRawListFromLocation(
 	req requests.BuahRawBulkCreateRequest,
-	jenisMap map[string]domain.JenisDurian,
+	prefixMap map[string]string,
 	sequenceMap map[string]int,
 	tglPanen string,
 ) ([]domain.BuahRaw, []string) {
 	var buahToInsert []domain.BuahRaw
 	var insertedIDs []string
 	now := time.Now()
+	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
 
 	for _, item := range req.Items {
-		jenis := jenisMap[item.JenisDurianID]
-		currentSeq := sequenceMap[jenis.Kode]
+		// Determine pohon ID for this item
+		pohonID := defaultPohonID
+		if item.PohonPanenID != nil && *item.PohonPanenID != "" {
+			pohonID = *item.PohonPanenID
+		}
+
+		prefix := prefixMap[pohonID]
+		if prefix == "" {
+			continue // Skip items with invalid prefix
+		}
+
+		currentSeq := sequenceMap[prefix]
 
 		for i := 0; i < item.Jumlah; i++ {
-			newKodeBuah := fmt.Sprintf("%s-%05d", jenis.Kode, currentSeq)
+			newKodeBuah := fmt.Sprintf("%s-F%05d", prefix, currentSeq)
 			newID := ksuid.New().String()
 
 			buah := domain.BuahRaw{
 				ID:          newID,
 				KodeBuah:    newKodeBuah,
 				JenisDurian: item.JenisDurianID,
-				BlokPanen:   req.BlokPanenID,
-				PohonPanen:  item.PohonPanenID,
+				PohonPanen:  &pohonID,
 				TglPanen:    tglPanen,
 				IsSorted:    false,
 				CreatedAt:   now,
@@ -199,7 +300,7 @@ func (s *buahRawService) buildBuahRawList(
 			currentSeq++
 		}
 
-		sequenceMap[jenis.Kode] = currentSeq
+		sequenceMap[prefix] = currentSeq
 	}
 
 	return buahToInsert, insertedIDs
@@ -288,11 +389,18 @@ func (s *buahRawService) Update(ctx context.Context, id string, req requests.Bua
 	if req.TglPanen != "" {
 		item.TglPanen = req.TglPanen
 	}
-	if req.BlokPanenID != "" {
-		item.BlokPanen = req.BlokPanenID
-	}
 	if req.PohonPanenID != nil {
-		item.PohonPanen = req.PohonPanenID
+		// If empty string provided, use default. If valid string, use it.
+		// If user sends explicit empty string, they might mean "reset to default" or "no tree".
+		// Requirement says: "kalau pohon idnya ga diisi default id pohonnya itu 6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
+		// So if user updates and sends "", set to default.
+		val := *req.PohonPanenID
+		if val == "" {
+			defaultID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
+			item.PohonPanen = &defaultID
+		} else {
+			item.PohonPanen = req.PohonPanenID
+		}
 	}
 	if req.JenisDurianID != "" {
 		item.JenisDurian = req.JenisDurianID
@@ -316,7 +424,7 @@ func (s *buahRawService) mapToResponse(item domain.BuahRaw) response.BuahRawResp
 		ID:          item.ID,
 		KodeBuah:    item.KodeBuah,
 		JenisDurian: s.buildJenisDetail(item.JenisDurianDetail),
-		LokasiPanen: s.buildLokasiPanen(item.BlokPanenDetail),
+		LokasiPanen: s.buildLokasiPanenFromPohon(item.PohonPanenDetail),
 		PohonPanen:  s.buildPohonKode(item.PohonPanenDetail, item.PohonPanen),
 		TglPanen:    item.TglPanen,
 		IsSorted:    item.IsSorted,
@@ -338,13 +446,14 @@ func (s *buahRawService) buildJenisDetail(detail *domain.JenisDurian) response.J
 	}
 }
 
-func (s *buahRawService) buildLokasiPanen(blok *domain.Blok) response.LokasiPanen {
+func (s *buahRawService) buildLokasiPanenFromPohon(pohon *domain.Pohon) response.LokasiPanen {
 	lokasi := response.LokasiPanen{}
 
-	if blok == nil {
+	if pohon == nil || pohon.Blok == nil {
 		return lokasi
 	}
 
+	blok := pohon.Blok
 	lokasi.BlokID = blok.ID
 	lokasi.BlokNama = blok.NamaBlok
 
@@ -356,7 +465,7 @@ func (s *buahRawService) buildLokasiPanen(blok *domain.Blok) response.LokasiPane
 
 			if blok.Divisi.Estate.Company != nil {
 				lokasi.CompanyNama = blok.Divisi.Estate.Company.Nama
-				lokasi.KodeLengkap = fmt.Sprintf("%s-%s-%s-%s",
+				lokasi.KodeLengkap = fmt.Sprintf("%s%s%s%s",
 					blok.Divisi.Estate.Company.Kode,
 					blok.Divisi.Estate.Kode,
 					blok.Divisi.Kode,
@@ -378,4 +487,25 @@ func (s *buahRawService) buildPohonKode(detail *domain.Pohon, pohonPanen *string
 		return nil
 	}
 	return nil
+}
+
+// buildLocationPrefix creates prefix from full hierarchy: Company+Estate+Divisi+Blok+Pohon
+// Example: IPSRES0101A010000 (IPS + RES + 01 + 01A01 + 0000)
+func (s *buahRawService) buildLocationPrefix(pohon *domain.Pohon) string {
+	if pohon == nil || pohon.Blok == nil {
+		return ""
+	}
+
+	blok := pohon.Blok
+	if blok.Divisi == nil || blok.Divisi.Estate == nil || blok.Divisi.Estate.Company == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s%s%s%s%s",
+		blok.Divisi.Estate.Company.Kode,
+		blok.Divisi.Estate.Kode,
+		blok.Divisi.Kode,
+		blok.Kode,
+		pohon.Kode,
+	)
 }

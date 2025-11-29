@@ -1,0 +1,1 @@
+ALTER TABLE pohon DROP CONSTRAINT pohon_kode_key;

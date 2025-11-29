@@ -82,3 +82,9 @@ type SalesTopBuyer struct {
 	Frekuensi          int     `json:"frekuensi"`
 	RataPerTransaksi   float64 `json:"rata_per_transaksi"`
 }
+
+type WarehouseDataResponse struct {
+	TotalBuahRawToday int `json:"total_buah_raw_today"`
+	TotalLotReady     int `json:"total_lot_ready"`
+	TotalLotSent      int `json:"total_lot_sent"`
+}

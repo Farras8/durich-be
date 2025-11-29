@@ -143,10 +143,10 @@ func (s *shipmentService) UpdateStatus(ctx context.Context, shipmentID string, r
 	isValidTransition := false
 	switch currentStatus {
 	case constants.ShipmentStatusDraft:
-		if newStatus == constants.ShipmentStatusOTW {
+		if newStatus == constants.ShipmentStatusSending {
 			isValidTransition = true
 		}
-	case constants.ShipmentStatusOTW:
+	case constants.ShipmentStatusSending:
 		if newStatus == constants.ShipmentStatusReceived {
 			isValidTransition = true
 		}

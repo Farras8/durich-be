@@ -20,4 +20,10 @@ func RegisterDashboard(router *gin.RouterGroup, ctl *controllers.DashboardContro
 	{
 		salesGroup.GET("", ctl.GetSalesDashboard)
 	}
+
+	warehouseDataGroup := router.Group("/dashboard/warehouse-data")
+	warehouseDataGroup.Use(middlewares.TokenAuthMiddleware(), middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse))
+	{
+		warehouseDataGroup.GET("", ctl.GetWarehouseData)
+	}
 }

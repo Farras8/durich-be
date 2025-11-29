@@ -22,7 +22,8 @@ type BuahRawRepository interface {
 	Update(ctx context.Context, data *domain.BuahRaw) error
 	Delete(ctx context.Context, id string) error
 	GetLotDetails(ctx context.Context, lotID string) ([]domain.BuahRaw, error)
-	GetNextSequenceWithLock(ctx context.Context, kodeJenis string) (int, error)
+	GetNextSequenceWithLock(ctx context.Context, prefix string, tglPanen string) (int, error)
+	GetPohonWithFullHierarchy(ctx context.Context, pohonID string) (*domain.Pohon, error)
 }
 
 type buahRawRepository struct {
@@ -90,21 +91,22 @@ func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string
 	if !ok || len(includeRelations) == 0 {
 		return q.
 			Relation("JenisDurianDetail").
-			Relation("BlokPanenDetail").
-			Relation("BlokPanenDetail.Divisi").
-			Relation("BlokPanenDetail.Divisi.Estate").
-			Relation("BlokPanenDetail.Divisi.Estate.Company").
-			Relation("PohonPanenDetail")
+			Relation("PohonPanenDetail").
+			Relation("PohonPanenDetail.Blok").
+			Relation("PohonPanenDetail.Blok.Divisi").
+			Relation("PohonPanenDetail.Blok.Divisi.Estate").
+			Relation("PohonPanenDetail.Blok.Divisi.Estate.Company")
 	}
 
 	if includeRelations["jenis"] {
 		q = q.Relation("JenisDurianDetail")
 	}
 	if includeRelations["blok"] {
-		q = q.Relation("BlokPanenDetail").
-			Relation("BlokPanenDetail.Divisi").
-			Relation("BlokPanenDetail.Divisi.Estate").
-			Relation("BlokPanenDetail.Divisi.Estate.Company")
+		q = q.Relation("PohonPanenDetail").
+			Relation("PohonPanenDetail.Blok").
+			Relation("PohonPanenDetail.Blok.Divisi").
+			Relation("PohonPanenDetail.Blok.Divisi.Estate").
+			Relation("PohonPanenDetail.Blok.Divisi.Estate.Company")
 	}
 	if includeRelations["pohon"] {
 		q = q.Relation("PohonPanenDetail")
@@ -117,14 +119,17 @@ func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]i
 	if val, ok := filter["tgl_panen"].(string); ok && val != "" {
 		q = q.Where("buah_raw.tgl_panen = ?", val)
 	}
-	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
-		q = q.Where("buah_raw.blok_panen = ?", val)
-	}
 	if val, ok := filter["jenis_durian_id"].(string); ok && val != "" {
 		q = q.Where("buah_raw.jenis_durian = ?", val)
 	}
+	if val, ok := filter["kode_buah"].(string); ok && val != "" {
+		q = q.Where("buah_raw.kode_buah LIKE ?", "%"+val+"%")
+	}
 	if val, ok := filter["is_sorted"]; ok {
 		q = q.Where("buah_raw.is_sorted = ?", val)
+	}
+	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
+		q = q.Where("pohon.blok_id = ?", val)
 	}
 
 	return q
@@ -134,11 +139,11 @@ func (r *buahRawRepository) GetByID(ctx context.Context, id string) (domain.Buah
 	var data domain.BuahRaw
 	err := r.db.InitQuery(ctx).NewSelect().Model(&data).
 		Relation("JenisDurianDetail").
-		Relation("BlokPanenDetail").
-		Relation("BlokPanenDetail.Divisi").
-		Relation("BlokPanenDetail.Divisi.Estate").
-		Relation("BlokPanenDetail.Divisi.Estate.Company").
 		Relation("PohonPanenDetail").
+		Relation("PohonPanenDetail.Blok").
+		Relation("PohonPanenDetail.Blok.Divisi").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
 		Where("buah_raw.id = ?", id).
 		Where("buah_raw.deleted_at IS NULL").
 		Scan(ctx)
@@ -180,7 +185,7 @@ func (r *buahRawRepository) GetLastKodeByJenis(ctx context.Context, kodeJenis st
 	return buah.KodeBuah, nil
 }
 
-func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, kodeJenis string) (int, error) {
+func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, prefix string, tglPanen string) (int, error) {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
 		return 0, err
@@ -191,7 +196,8 @@ func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, kodeJen
 	err = tx.NewSelect().
 		Model(&buah).
 		Column("kode_buah").
-		Where("kode_buah LIKE ?", fmt.Sprintf("%s-%%", kodeJenis)).
+		Where("kode_buah LIKE ?", fmt.Sprintf("%s-F%%", prefix)).
+		Where("tgl_panen = ?", tglPanen).
 		Order("kode_buah DESC").
 		Limit(1).
 		For("UPDATE").
@@ -200,7 +206,8 @@ func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, kodeJen
 	sequence := 1
 	if err == nil && buah.KodeBuah != "" {
 		var lastSeq int
-		_, err = fmt.Sscanf(buah.KodeBuah, kodeJenis+"-%d", &lastSeq)
+		// Format is PREFIX-Fxxxxx
+		_, err = fmt.Sscanf(buah.KodeBuah, prefix+"-F%d", &lastSeq)
 		if err == nil {
 			sequence = lastSeq + 1
 		}
@@ -284,13 +291,32 @@ func (r *buahRawRepository) GetLotDetails(ctx context.Context, lotID string) ([]
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&buahList).
 		Join("INNER JOIN tb_lot_detail ON tb_lot_detail.buah_raw_id = buah_raw.id").
-		Relation("BlokPanenDetail").
-		Relation("BlokPanenDetail.Divisi").
-		Relation("BlokPanenDetail.Divisi.Estate").
-		Relation("BlokPanenDetail.Divisi.Estate.Company").
+		Relation("PohonPanenDetail").
+		Relation("PohonPanenDetail.Blok").
+		Relation("PohonPanenDetail.Blok.Divisi").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
 		Where("tb_lot_detail.lot_id = ?", lotID).
 		Where("buah_raw.deleted_at IS NULL").
 		Scan(ctx)
 
 	return buahList, err
+}
+
+func (r *buahRawRepository) GetPohonWithFullHierarchy(ctx context.Context, pohonID string) (*domain.Pohon, error) {
+	var pohon domain.Pohon
+	err := r.db.InitQuery(ctx).NewSelect().
+		Model(&pohon).
+		Relation("Blok").
+		Relation("Blok.Divisi").
+		Relation("Blok.Divisi.Estate").
+		Relation("Blok.Divisi.Estate.Company").
+		Where("pohon.id = ?", pohonID).
+		Scan(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &pohon, nil
 }

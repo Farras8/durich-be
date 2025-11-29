@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"strings"
+	"time"
 
 	"durich-be/internal/controllers"
 	"durich-be/internal/repository"
@@ -11,15 +13,12 @@ import (
 	"durich-be/pkg/config"
 	"durich-be/pkg/database"
 
-	"github.com/gin-gonic/gin"
 	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cfg, _ := config.LoadConfig()
 
 	database.InitDB(cfg.Database)
 	db := database.GetDB()
@@ -35,30 +34,23 @@ func main() {
 
 	userRepo := repository.NewUserRepository(db)
 	authRepo := repository.NewAuthenticationRepository(db)
+	buahRawRepo := repository.NewBuahRawRepository(db)
+	masterDataRepo := repository.NewMasterDataRepository(db)
+	lotRepo := repository.NewLotRepository(db)
+	shipmentRepo := repository.NewShipmentRepository(db)
+	salesRepo := repository.NewSalesRepository(db)
+	dashboardRepo := repository.NewDashboardRepository(db)
+	traceabilityRepo := repository.NewTraceabilityRepository(db)
 
 	authService := services.NewAuthService(userRepo, authRepo)
 	profileService := services.NewProfileService(userRepo, authRepo)
 	memberService := services.NewMemberService(userRepo, authRepo)
-	
-	buahRawRepo := repository.NewBuahRawRepository(db)
 	buahRawService := services.NewBuahRawService(buahRawRepo)
-
-	masterDataRepo := repository.NewMasterDataRepository(db)
 	masterDataService := services.NewMasterDataService(masterDataRepo)
-
-	lotRepo := repository.NewLotRepository(db)
 	lotService := services.NewLotService(lotRepo, buahRawRepo)
-
-	shipmentRepo := repository.NewShipmentRepository(db)
 	shipmentService := services.NewShipmentService(shipmentRepo)
-
-	salesRepo := repository.NewSalesRepository(db)
 	salesService := services.NewSalesService(salesRepo)
-
-	dashboardRepo := repository.NewDashboardRepository(db)
 	dashboardService := services.NewDashboardService(dashboardRepo)
-
-	traceabilityRepo := repository.NewTraceabilityRepository(db)
 	traceabilityService := services.NewTraceabilityService(traceabilityRepo)
 
 	authController := controllers.NewAuthController(authService)
@@ -74,14 +66,21 @@ func main() {
 
 	router := gin.Default()
 
-	corsConfig := cors.Config{
-		AllowOrigins:     []string{"*"},
+	router.RedirectTrailingSlash = false
+	router.RedirectFixedPath = false
+
+	router.Use(cors.New(cors.Config{
+		AllowOriginFunc: func(origin string) bool {
+			// Allow all localhost and 127.0.0.1 origins with any port
+			return strings.HasPrefix(origin, "http://localhost:") ||
+				strings.HasPrefix(origin, "http://127.0.0.1:")
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: false,
-	}
-	router.Use(cors.New(corsConfig))
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	v1 := router.Group("/v1")
 	routes.RegisterAuth(v1, authController, profileController, memberController)
@@ -93,6 +92,6 @@ func main() {
 	routes.RegisterDashboard(v1, dashboardController)
 	routes.RegisterTraceability(v1, traceabilityController)
 
-	log.Printf("Server starting on port %s", cfg.Server.Port)
-	router.Run(":" + cfg.Server.Port)
+	log.Printf("Server running on port %s", cfg.Server.Port)
+	log.Fatal(router.Run(":" + cfg.Server.Port))
 }

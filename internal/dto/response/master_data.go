@@ -50,9 +50,11 @@ type JenisDurianResponse struct {
 }
 
 type PohonResponse struct {
-	ID        string    `json:"id"`
-	Kode      string    `json:"kode"`
-	Nama      string    `json:"nama"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Kode        string    `json:"kode"`
+	Nama        string    `json:"nama"`
+	KodeLengkap string    `json:"kode_lengkap,omitempty"`
+	BlokID      *string   `json:"blok_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

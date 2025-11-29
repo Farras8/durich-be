@@ -135,9 +135,11 @@ type Pohon struct {
 	ID        string     `bun:",pk" json:"id"`
 	Kode      string     `bun:",unique,notnull" json:"kode"`
 	Nama      string     `bun:",notnull" json:"nama"`
+	BlokID    *string    `bun:"," json:"blok_id,omitempty"`
 	CreatedAt time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 	DeletedAt *time.Time `bun:"," json:"deleted_at,omitempty"`
+	Blok      *Blok      `bun:"rel:belongs-to,join:blok_id=id" json:"blok,omitempty"`
 }
 
 func (m *Pohon) BeforeAppendModel(_ context.Context, query bun.Query) error {

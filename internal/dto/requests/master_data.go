@@ -52,10 +52,12 @@ type JenisDurianUpdateRequest struct {
 }
 
 type PohonCreateRequest struct {
-	Kode string `json:"kode" binding:"required,max=5"`
-	Nama string `json:"nama" binding:"required"`
+	Kode   string  `json:"kode" binding:"required,max=5"`
+	Nama   string  `json:"nama" binding:"required"`
+	BlokID *string `json:"blok_id"`
 }
 
 type PohonUpdateRequest struct {
-	Nama string `json:"nama" binding:"required"`
+	Nama   string  `json:"nama" binding:"required"`
+	BlokID *string `json:"blok_id"`
 }

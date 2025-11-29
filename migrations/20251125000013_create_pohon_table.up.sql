@@ -1,0 +1,13 @@
+CREATE TABLE pohon (
+    id VARCHAR(27) PRIMARY KEY,
+    kode VARCHAR(5) UNIQUE NOT NULL,
+    nama TEXT NOT NULL,
+    blok_id VARCHAR(27),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT fk_pohon_blok FOREIGN KEY (blok_id) REFERENCES blok(id)
+);
+
+INSERT INTO pohon (id, kode, nama, blok_id) VALUES
+('6SRlQ8zX9vJ2mN5P6Q7R8S9T001', '0000', 'Pohon Default', '2SRlQ8zX9vJ2mN5P6Q7R8S9T001')

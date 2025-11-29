@@ -46,10 +46,10 @@ func (c *LotController) Create(ctx *gin.Context) {
 
 func (c *LotController) GetList(ctx *gin.Context) {
 	status := ctx.Query("status")
-	jenisDurian := ctx.Query("jenis_durian")
+	jenisDurianID := ctx.Query("jenis_durian_id")
 	kondisi := ctx.Query("kondisi")
 
-	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurian, kondisi)
+	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",

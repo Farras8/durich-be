@@ -10,6 +10,7 @@ import (
 type DashboardService interface {
 	GetStokDashboard(ctx context.Context, dateFrom, dateTo string) (*response.DashboardStokResponse, error)
 	GetSalesDashboard(ctx context.Context, dateFrom, dateTo string) (*response.DashboardSalesResponse, error)
+	GetWarehouseData(ctx context.Context) (*response.WarehouseDataResponse, error)
 }
 
 type dashboardService struct {
@@ -36,6 +37,10 @@ func (s *dashboardService) GetSalesDashboard(ctx context.Context, dateFrom, date
 	}
 
 	return s.repo.GetSalesDashboard(ctx, from, to)
+}
+
+func (s *dashboardService) GetWarehouseData(ctx context.Context) (*response.WarehouseDataResponse, error) {
+	return s.repo.GetWarehouseData(ctx)
 }
 
 func (s *dashboardService) parseDateRange(dateFrom, dateTo string) (time.Time, time.Time, error) {

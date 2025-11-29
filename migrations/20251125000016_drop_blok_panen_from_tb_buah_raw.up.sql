@@ -1,0 +1,1 @@
+ALTER TABLE tb_buah_raw DROP COLUMN blok_panen;

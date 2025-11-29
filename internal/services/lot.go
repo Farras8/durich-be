@@ -9,6 +9,7 @@ import (
 	"durich-be/internal/repository"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type LotService interface {
@@ -33,29 +34,39 @@ func NewLotService(lotRepo repository.LotRepository, buahRawRepo repository.Buah
 }
 
 func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest) (*response.LotResponse, error) {
-	lot := &domain.StokLot{
-		JenisDurian: req.JenisDurianID,
-		KondisiBuah: req.KondisiBuah,
-		Status:      constants.LotStatusDraft,
+	// Get jenis durian detail first to get code
+	jenis, err := s.buahRawRepo.GetJenisDurianByID(ctx, req.JenisDurianID)
+	if err != nil {
+		return nil, fmt.Errorf("jenis durian tidak ditemukan: %v", err)
 	}
 
-	err := s.lotRepo.Create(ctx, lot)
+	dateStr := time.Now().Format("020106") // DDMMYY
+
+	kode, err := s.lotRepo.GetNextLotSequence(ctx, dateStr, jenis.Kode, req.KondisiBuah)
+	if err != nil {
+		return nil, fmt.Errorf("gagal generate kode lot: %v", err)
+	}
+
+	lot := &domain.StokLot{
+		Kode:          kode,
+		JenisDurianID: req.JenisDurianID,
+		KondisiBuah:   req.KondisiBuah,
+		Status:        constants.LotStatusDraft,
+	}
+
+	err = s.lotRepo.Create(ctx, lot)
 	if err != nil {
 		return nil, err
 	}
 
-	// Fetch nama jenis durian untuk response
-	// Agar simple & clean, kita panggil GetByID dari lotRepo yang sudah ada Relation
-	createdLot, err := s.lotRepo.GetByID(ctx, lot.ID)
-	namaJenis := ""
-	if err == nil && createdLot.JenisDurianDetail != nil {
-		namaJenis = createdLot.JenisDurianDetail.NamaJenis
-	}
+	// Attach relation manual for response
+	lot.JenisDurianDetail = &jenis
 
 	return &response.LotResponse{
 		ID:              lot.ID,
-		JenisDurianID:   lot.JenisDurian,
-		JenisDurianNama: namaJenis,
+		Kode:            lot.Kode,
+		JenisDurianID:   lot.JenisDurianID,
+		JenisDurianNama: jenis.NamaJenis,
 		KondisiBuah:     lot.KondisiBuah,
 		BeratAwal:       lot.BeratAwal,
 		QtyAwal:         lot.QtyAwal,
@@ -66,8 +77,8 @@ func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest) 
 	}, nil
 }
 
-func (s *lotService) GetList(ctx context.Context, status, jenisDurian, kondisi string) ([]response.LotResponse, error) {
-	lots, err := s.lotRepo.GetList(ctx, status, jenisDurian, kondisi)
+func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi string) ([]response.LotResponse, error) {
+	lots, err := s.lotRepo.GetList(ctx, status, jenisDurianID, kondisi)
 	if err != nil {
 		return nil, err
 	}
@@ -78,10 +89,11 @@ func (s *lotService) GetList(ctx context.Context, status, jenisDurian, kondisi s
 		if lot.JenisDurianDetail != nil {
 			namaJenis = lot.JenisDurianDetail.NamaJenis
 		}
-		
+
 		result[i] = response.LotResponse{
 			ID:              lot.ID,
-			JenisDurianID:   lot.JenisDurian,
+			Kode:            lot.Kode,
+			JenisDurianID:   lot.JenisDurianID,
 			JenisDurianNama: namaJenis,
 			KondisiBuah:     lot.KondisiBuah,
 			BeratAwal:       lot.BeratAwal,
@@ -108,16 +120,16 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 	}
 
 	items := []response.LotItemResponse{}
-	
+
 	detailList, err := s.buahRawRepo.GetLotDetails(ctx, id)
 	if err == nil {
 		for _, buah := range detailList {
 			asalBlok := ""
-			if buah.BlokPanenDetail != nil {
-				blok := buah.BlokPanenDetail
-				if blok.Divisi != nil && blok.Divisi.Estate != nil && 
-				   blok.Divisi.Estate.Company != nil {
-					asalBlok = fmt.Sprintf("%s-%s-%s-%s",
+			if buah.PohonPanenDetail != nil && buah.PohonPanenDetail.Blok != nil {
+				blok := buah.PohonPanenDetail.Blok
+				if blok.Divisi != nil && blok.Divisi.Estate != nil &&
+					blok.Divisi.Estate.Company != nil {
+					asalBlok = fmt.Sprintf("%s%s%s%s",
 						blok.Divisi.Estate.Company.Kode,
 						blok.Divisi.Estate.Kode,
 						blok.Divisi.Kode,
@@ -138,7 +150,8 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 	return &response.LotDetailResponse{
 		Header: response.LotResponse{
 			ID:              lot.ID,
-			JenisDurianID:   lot.JenisDurian,
+			Kode:            lot.Kode,
+			JenisDurianID:   lot.JenisDurianID,
 			JenisDurianNama: namaJenis,
 			KondisiBuah:     lot.KondisiBuah,
 			BeratAwal:       lot.BeratAwal,
@@ -172,7 +185,7 @@ func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.Lo
 			return nil, fmt.Errorf("buah dengan ID %s sudah masuk lot lain", buahID)
 		}
 
-		if buah.JenisDurian != lot.JenisDurian {
+		if buah.JenisDurian != lot.JenisDurianID {
 			return nil, fmt.Errorf("buah %s memiliki jenis durian yang berbeda dengan lot ini", buah.KodeBuah)
 		}
 	}

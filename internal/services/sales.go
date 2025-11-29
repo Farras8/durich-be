@@ -27,16 +27,15 @@ func NewSalesService(repo repository.SalesRepository) SalesService {
 }
 
 func (s *salesService) Create(ctx context.Context, req requests.SalesCreateRequest) (*response.SalesResponse, error) {
-	
+
 	shipment, err := s.repo.GetPengirimanByID(ctx, req.PengirimanID)
 	if err != nil {
 		return nil, err
 	}
-	if shipment.Status != constants.ShipmentStatusOTW {
-		return nil, errors.ValidationError("shipment status must be OTW")
+	if shipment.Status != constants.ShipmentStatusSending {
+		return nil, errors.ValidationError("shipment status must be SENDING")
 	}
 
-	
 	exists, err := s.repo.CheckSalesExistByShipmentID(ctx, req.PengirimanID)
 	if err != nil {
 		return nil, err
@@ -84,7 +83,6 @@ func (s *salesService) GetByID(ctx context.Context, id string) (*response.SalesD
 		return nil, err
 	}
 
-	
 	items := make([]response.ShipmentItemResponse, 0)
 	if sales.Pengiriman != nil {
 		for _, d := range sales.Pengiriman.Details {
@@ -103,7 +101,7 @@ func (s *salesService) GetByID(ctx context.Context, id string) (*response.SalesD
 
 	pengirimanInfo := response.SalesShipmentInfoResponse{
 		ID:      sales.PengirimanID,
-		Tujuan:  "", 
+		Tujuan:  "",
 		Status:  "",
 		Details: items,
 	}

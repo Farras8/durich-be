@@ -10,7 +10,7 @@ import (
 
 func RegisterSales(router *gin.RouterGroup, ctl *controllers.SalesController) {
 	group := router.Group("/sales")
-	group.Use(middlewares.TokenAuthMiddleware(), middlewares.RoleHandler(domain.RoleAdmin))
+	group.Use(middlewares.TokenAuthMiddleware(), middlewares.RoleHandler(domain.RoleAdmin, domain.RoleSales))
 	{
 		group.POST("", ctl.Create)
 		group.GET("", ctl.GetList)

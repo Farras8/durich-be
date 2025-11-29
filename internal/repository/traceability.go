@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"durich-be/internal/dto/response"
 	"durich-be/internal/domain"
+	"durich-be/internal/dto/response"
 	"durich-be/pkg/database"
 	"fmt"
 	"time"
@@ -171,7 +171,7 @@ func (r *traceabilityRepository) TraceShipment(ctx context.Context, shipmentID s
 	totalQty := 0
 	totalBerat := float64(0)
 	lotIDs := make([]string, 0, len(shipment.Details))
-	
+
 	for _, detail := range shipment.Details {
 		totalQty += detail.QtyAmbil
 		totalBerat += detail.BeratAmbil
@@ -237,45 +237,46 @@ func (r *traceabilityRepository) TraceShipment(ctx context.Context, shipmentID s
 
 func (r *traceabilityRepository) buildLokasiInfo(fruit domain.BuahRaw) response.LokasiTraceInfo {
 	lokasi := response.LokasiTraceInfo{}
-	
-	if fruit.BlokPanenDetail == nil {
+
+	if fruit.PohonPanenDetail == nil || fruit.PohonPanenDetail.Blok == nil {
 		return lokasi
 	}
 
-	lokasi.Blok = fruit.BlokPanenDetail.Kode
-	
-	if fruit.BlokPanenDetail.Divisi == nil {
+	lokasi.Blok = fruit.PohonPanenDetail.Blok.Kode
+
+	if fruit.PohonPanenDetail.Blok.Divisi == nil {
 		return lokasi
 	}
 
-	lokasi.Divisi = fruit.BlokPanenDetail.Divisi.Kode
-	
-	if fruit.BlokPanenDetail.Divisi.Estate == nil {
+	lokasi.Divisi = fruit.PohonPanenDetail.Blok.Divisi.Kode
+
+	if fruit.PohonPanenDetail.Blok.Divisi.Estate == nil {
 		return lokasi
 	}
 
-	lokasi.Estate = fruit.BlokPanenDetail.Divisi.Estate.Kode
-	
-	if fruit.BlokPanenDetail.Divisi.Estate.Company != nil {
-		lokasi.Company = fruit.BlokPanenDetail.Divisi.Estate.Company.Kode
+	lokasi.Estate = fruit.PohonPanenDetail.Blok.Divisi.Estate.Kode
+
+	if fruit.PohonPanenDetail.Blok.Divisi.Estate.Company != nil {
+		lokasi.Company = fruit.PohonPanenDetail.Blok.Divisi.Estate.Company.Kode
 	}
 
 	return lokasi
 }
 
 func (r *traceabilityRepository) buildLokasiString(fruit domain.BuahRaw) string {
-	if fruit.BlokPanenDetail == nil ||
-		fruit.BlokPanenDetail.Divisi == nil ||
-		fruit.BlokPanenDetail.Divisi.Estate == nil ||
-		fruit.BlokPanenDetail.Divisi.Estate.Company == nil {
+	if fruit.PohonPanenDetail == nil ||
+		fruit.PohonPanenDetail.Blok == nil ||
+		fruit.PohonPanenDetail.Blok.Divisi == nil ||
+		fruit.PohonPanenDetail.Blok.Divisi.Estate == nil ||
+		fruit.PohonPanenDetail.Blok.Divisi.Estate.Company == nil {
 		return ""
 	}
 
-	return fmt.Sprintf("%s-%s-%s-%s",
-		fruit.BlokPanenDetail.Divisi.Estate.Company.Kode,
-		fruit.BlokPanenDetail.Divisi.Estate.Kode,
-		fruit.BlokPanenDetail.Divisi.Kode,
-		fruit.BlokPanenDetail.Kode)
+	return fmt.Sprintf("%s%s%s%s",
+		fruit.PohonPanenDetail.Blok.Divisi.Estate.Company.Kode,
+		fruit.PohonPanenDetail.Blok.Divisi.Estate.Kode,
+		fruit.PohonPanenDetail.Blok.Divisi.Kode,
+		fruit.PohonPanenDetail.Blok.Kode)
 }
 
 func (r *traceabilityRepository) buildFruitJourney(ctx context.Context, fruitID string) response.FruitJourney {
@@ -287,7 +288,7 @@ func (r *traceabilityRepository) buildFruitJourney(ctx context.Context, fruitID 
 		Relation("Lot").
 		Where("buah_raw_id = ?", fruitID).
 		Scan(ctx)
-	
+
 	if err != nil || lotDetail.LotID == "" {
 		return journey
 	}
@@ -311,7 +312,7 @@ func (r *traceabilityRepository) buildFruitJourney(ctx context.Context, fruitID 
 		Join("INNER JOIN tb_pengiriman p ON p.id = pd.pengiriman_id").
 		Where("pd.lot_sumber_id = ?", lot.ID).
 		Scan(ctx)
-	
+
 	if err != nil || pengirimanDetail.ID == "" {
 		return journey
 	}
@@ -334,7 +335,7 @@ func (r *traceabilityRepository) buildFruitJourney(ctx context.Context, fruitID 
 		Where("pengiriman_id = ?", pengiriman.ID).
 		Where("deleted_at IS NULL").
 		Scan(ctx)
-	
+
 	if err == nil && penjualan.ID != "" {
 		journey.Sales = &response.SalesJourneyInfo{
 			ID:           penjualan.ID,

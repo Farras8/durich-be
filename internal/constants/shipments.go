@@ -2,7 +2,7 @@ package constants
 
 const (
 	ShipmentStatusDraft     = "DRAFT"
-	ShipmentStatusOTW       = "OTW"
+	ShipmentStatusSending   = "SENDING"
 	ShipmentStatusReceived  = "RECEIVED"
 	ShipmentStatusCompleted = "COMPLETED"
 )
