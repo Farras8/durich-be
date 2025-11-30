@@ -1,0 +1,2 @@
+ALTER TABLE tb_pengiriman ADD COLUMN kode TEXT NOT NULL ;
+

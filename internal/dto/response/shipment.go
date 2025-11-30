@@ -7,6 +7,7 @@ import (
 
 type ShipmentResponse struct {
 	ID         string    `json:"id"`
+	Kode       string    `json:"kode"`
 	Tujuan     string    `json:"tujuan"`
 	TglKirim   time.Time `json:"tgl_kirim"`
 	Status     string    `json:"status"`
@@ -17,11 +18,12 @@ type ShipmentResponse struct {
 }
 
 type ShipmentItemResponse struct {
-	ID             string  `json:"id"`
-	LotID          string  `json:"lot_id"`
-	JenisDurian    string  `json:"jenis_durian"`
-	QtyAmbil       int     `json:"qty_ambil"`
-	BeratAmbil     float64 `json:"berat_ambil"`
+	ID          string  `json:"id"`
+	LotID       string  `json:"lot_id"`
+	JenisDurian string  `json:"jenis_durian"`
+	Grade       string  `json:"grade"`
+	QtyAmbil    int     `json:"qty_ambil"`
+	BeratAmbil  float64 `json:"berat_ambil"`
 }
 
 type ShipmentDetailResponse struct {
@@ -47,6 +49,7 @@ func NewShipmentResponse(p *domain.Pengiriman) ShipmentResponse {
 
 	return ShipmentResponse{
 		ID:         p.ID,
+		Kode:       p.Kode,
 		Tujuan:     p.Tujuan,
 		TglKirim:   p.TglKirim,
 		Status:     p.Status,

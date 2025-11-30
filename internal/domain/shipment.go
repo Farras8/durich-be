@@ -12,6 +12,7 @@ type Pengiriman struct {
 	bun.BaseModel `bun:"table:tb_pengiriman,alias:p"`
 
 	ID        string     `bun:",pk" json:"id"`
+	Kode      string     `bun:",notnull" json:"kode"`
 	Tujuan    string     `bun:",notnull" json:"tujuan"`
 	TglKirim  time.Time  `bun:",notnull" json:"tgl_kirim"`
 	Status    string     `bun:",default:'SENT'" json:"status"`

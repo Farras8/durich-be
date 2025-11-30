@@ -33,19 +33,26 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	kode, err := s.repo.GetNextShipmentKode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	tglKirim := req.TglKirim
 	if tglKirim.IsZero() {
 		tglKirim = time.Now()
 	}
 
 	shipment := &domain.Pengiriman{
+		Kode:      kode,
 		Tujuan:    req.Tujuan,
 		TglKirim:  tglKirim,
 		Status:    constants.ShipmentStatusDraft,
 		CreatedBy: userID,
 	}
 
-	if err := s.repo.Create(ctx, shipment); err != nil {
+	err = s.repo.Create(ctx, shipment)
+	if err != nil {
 		return nil, err
 	}
 
@@ -95,8 +102,11 @@ func (s *shipmentService) GetByID(ctx context.Context, id string) (*response.Shi
 			QtyAmbil:   d.QtyAmbil,
 			BeratAmbil: d.BeratAmbil,
 		}
-		if d.Lot != nil && d.Lot.JenisDurianDetail != nil {
-			item.JenisDurian = d.Lot.JenisDurianDetail.NamaJenis
+		if d.Lot != nil {
+			item.Grade = d.Lot.KondisiBuah
+			if d.Lot.JenisDurianDetail != nil {
+				item.JenisDurian = d.Lot.JenisDurianDetail.NamaJenis
+			}
 		}
 		items = append(items, item)
 	}

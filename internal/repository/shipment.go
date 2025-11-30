@@ -6,6 +6,8 @@ import (
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/uptrace/bun"
 )
@@ -19,6 +21,7 @@ type ShipmentRepository interface {
 	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
 	Finalize(ctx context.Context, id string) error
 	GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error)
+	GetNextShipmentKode(ctx context.Context) (string, error)
 }
 
 type shipmentRepository struct {
@@ -262,4 +265,29 @@ func (r *shipmentRepository) GetDetailByID(ctx context.Context, id string) (*dom
 		return nil, err
 	}
 	return detail, nil
+}
+
+func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context) (string, error) {
+	dateStr := time.Now().Format("060102") // YYMMDD
+	prefix := fmt.Sprintf("SHP-%s", dateStr)
+
+	var lastCode string
+	err := r.db.InitQuery(ctx).NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("kode").
+		Where("kode LIKE ?", prefix+"-%").
+		Order("kode DESC").
+		Limit(1).
+		Scan(ctx, &lastCode)
+
+	seq := 1
+	if err == nil && lastCode != "" {
+		var lastSeq int
+		_, err := fmt.Sscanf(lastCode, prefix+"-%d", &lastSeq)
+		if err == nil {
+			seq = lastSeq + 1
+		}
+	}
+
+	return fmt.Sprintf("%s-%03d", prefix, seq), nil
 }
