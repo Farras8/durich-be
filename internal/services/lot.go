@@ -100,6 +100,7 @@ func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi
 			QtyAwal:         lot.QtyAwal,
 			BeratSisa:       lot.BeratSisa,
 			QtySisa:         lot.QtySisa,
+			CurrentQty:      lot.CurrentQty,
 			Status:          lot.Status,
 			CreatedAt:       lot.CreatedAt,
 		}
@@ -147,6 +148,13 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 		}
 	}
 
+	// Use the length of items as CurrentQty for consistency in GetDetail
+	currentQty := len(items)
+	// Or rely on lot.CurrentQty if GetByID already fetches it correctly (which we updated it to do)
+	// But len(items) is more "real-time" if GetLotDetails is the source of truth for items list.
+	// However, GetByID also queries the count. Let's stick to len(items) if available, or fallback.
+	// Actually, since we display items, len(items) IS the current qty being displayed.
+
 	return &response.LotDetailResponse{
 		Header: response.LotResponse{
 			ID:              lot.ID,
@@ -158,6 +166,7 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 			QtyAwal:         lot.QtyAwal,
 			BeratSisa:       lot.BeratSisa,
 			QtySisa:         lot.QtySisa,
+			CurrentQty:      currentQty,
 			Status:          lot.Status,
 			CreatedAt:       lot.CreatedAt,
 		},
