@@ -12,6 +12,7 @@ type LotResponse struct {
 	QtyAwal         int       `json:"qty_awal"`
 	BeratSisa       float64   `json:"berat_sisa"`
 	QtySisa         int       `json:"qty_sisa"`
+	CurrentQty      int       `json:"current_qty"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 }

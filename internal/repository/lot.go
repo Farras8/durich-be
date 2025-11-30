@@ -39,6 +39,8 @@ func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(lot).
 		Relation("JenisDurianDetail").
+		ColumnExpr("stok_lot.*").
+		ColumnExpr("(SELECT COUNT(*) FROM tb_lot_detail WHERE lot_id = stok_lot.id) AS current_qty").
 		Where("stok_lot.id = ?", id).
 		Where("stok_lot.deleted_at IS NULL").
 		Scan(ctx)
@@ -53,6 +55,8 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&lots).
 		Relation("JenisDurianDetail").
+		ColumnExpr("stok_lot.*").
+		ColumnExpr("(SELECT COUNT(*) FROM tb_lot_detail WHERE lot_id = stok_lot.id) AS current_qty").
 		Where("stok_lot.deleted_at IS NULL")
 
 	if status != "" {
