@@ -15,6 +15,8 @@ type BuahRawCreateRequest struct {
 	TglPanen      string  `json:"tgl_panen"`
 	JenisDurianID string  `json:"jenis_durian_id" binding:"required"`
 	PohonPanenID  *string `json:"pohon_panen_id"`
+	BlokPanenID   *string `json:"blok_panen_id"`
+	Berat         float64 `json:"berat"`
 }
 
 type BuahRawUpdateRequest struct {

@@ -140,14 +140,8 @@ func (c *LotController) RemoveItem(ctx *gin.Context) {
 func (c *LotController) Finalize(ctx *gin.Context) {
 	id := ctx.Param("id")
 
-	var req requests.LotFinalizeRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": err.Error(),
-		})
-		return
-	}
+	// No body required for Finalize
+	req := requests.LotFinalizeRequest{}
 
 	result, err := c.lotService.Finalize(ctx.Request.Context(), id, req)
 	if err != nil {

@@ -103,6 +103,7 @@ func (s *shipmentService) GetByID(ctx context.Context, id string) (*response.Shi
 			BeratAmbil: d.BeratAmbil,
 		}
 		if d.Lot != nil {
+			item.KodeLot = d.Lot.Kode
 			item.Grade = d.Lot.KondisiBuah
 			if d.Lot.JenisDurianDetail != nil {
 				item.JenisDurian = d.Lot.JenisDurianDetail.NamaJenis

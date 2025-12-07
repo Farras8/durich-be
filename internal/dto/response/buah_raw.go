@@ -21,8 +21,9 @@ type BuahRawResponse struct {
 	JenisDurian JenisDurianDetail `json:"jenis_durian"`
 	LokasiPanen LokasiPanen       `json:"lokasi_panen"`
 	PohonPanen  *string           `json:"pohon_panen"`
+	KodePohon   string            `json:"kode_pohon"` // Added field
+	LotKode     *string           `json:"kode_lot"`   // Added field
 	TglPanen    string            `json:"tgl_panen"`
-	IsSorted    bool              `json:"is_sorted"`
 	CreatedAt   string            `json:"created_at"`
 }
 

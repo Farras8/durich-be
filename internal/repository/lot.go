@@ -12,13 +12,14 @@ type LotRepository interface {
 	GetByID(ctx context.Context, id string) (*domain.StokLot, error)
 	GetList(ctx context.Context, status, jenisDurianID, kondisi string) ([]domain.StokLot, error)
 	Update(ctx context.Context, lot *domain.StokLot) error
-	AddItems(ctx context.Context, lotID string, buahRawIDs []string) error
+	AddBuah(ctx context.Context, buah *domain.BuahRaw) error
 	RemoveItem(ctx context.Context, lotID, buahRawID string) error
 	GetItemCount(ctx context.Context, lotID string) (int, error)
 	GetBuahRawByID(ctx context.Context, id string) (*domain.BuahRaw, error)
-	UpdateBuahRawSorted(ctx context.Context, id string, isSorted bool) error
 	GetNextLotKode(ctx context.Context) (string, error)
 	GetNextLotSequence(ctx context.Context, dateStr, jenisKode, grade string) (string, error)
+	GetPohonByKode(ctx context.Context, kode string, blokID string) (*domain.Pohon, error)
+	GetTotalWeight(ctx context.Context, lotID string) (float64, error)
 }
 
 type lotRepository struct {
@@ -40,7 +41,8 @@ func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot
 		Model(lot).
 		Relation("JenisDurianDetail").
 		ColumnExpr("stok_lot.*").
-		ColumnExpr("(SELECT COUNT(*) FROM tb_lot_detail WHERE lot_id = stok_lot.id) AS current_qty").
+		ColumnExpr("(SELECT COUNT(*) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_qty").
+		ColumnExpr("(SELECT COALESCE(SUM(berat), 0) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_berat").
 		Where("stok_lot.id = ?", id).
 		Where("stok_lot.deleted_at IS NULL").
 		Scan(ctx)
@@ -56,7 +58,8 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 		Model(&lots).
 		Relation("JenisDurianDetail").
 		ColumnExpr("stok_lot.*").
-		ColumnExpr("(SELECT COUNT(*) FROM tb_lot_detail WHERE lot_id = stok_lot.id) AS current_qty").
+		ColumnExpr("(SELECT COUNT(*) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_qty").
+		ColumnExpr("(SELECT COALESCE(SUM(berat), 0) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_berat").
 		Where("stok_lot.deleted_at IS NULL")
 
 	if status != "" {
@@ -86,70 +89,54 @@ func (r *lotRepository) Update(ctx context.Context, lot *domain.StokLot) error {
 	return err
 }
 
-func (r *lotRepository) AddItems(ctx context.Context, lotID string, buahRawIDs []string) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
+func (r *lotRepository) AddBuah(ctx context.Context, buah *domain.BuahRaw) error {
+	_, err := r.db.InitQuery(ctx).NewInsert().Model(buah).Exec(ctx)
+	return err
+}
+
+func (r *lotRepository) GetPohonByKode(ctx context.Context, kode string, blokID string) (*domain.Pohon, error) {
+	pohon := new(domain.Pohon)
+	query := r.db.InitQuery(ctx).NewSelect().
+		Model(pohon).
+		Relation("Blok").
+		Relation("Blok.Divisi").
+		Relation("Blok.Divisi.Estate").
+		Relation("Blok.Divisi.Estate.Company").
+		Where("pohon.kode = ?", kode).
+		Where("pohon.blok_id = ?", blokID)
+
+	err := query.Scan(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer tx.Rollback()
-
-	for _, buahID := range buahRawIDs {
-		detail := &domain.LotDetail{
-			LotID:     lotID,
-			BuahRawID: buahID,
-		}
-		_, err := tx.NewInsert().Model(detail).Exec(ctx)
-		if err != nil {
-			return err
-		}
-
-		_, err = tx.NewUpdate().
-			Model((*domain.BuahRaw)(nil)).
-			Set("is_sorted = ?", true).
-			Where("id = ?", buahID).
-			Exec(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	return pohon, nil
 }
 
 func (r *lotRepository) RemoveItem(ctx context.Context, lotID, buahRawID string) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.NewDelete().
-		Model((*domain.LotDetail)(nil)).
-		Where("lot_id = ?", lotID).
-		Where("buah_raw_id = ?", buahRawID).
-		Exec(ctx)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.NewUpdate().
+	_, err := r.db.InitQuery(ctx).NewDelete().
 		Model((*domain.BuahRaw)(nil)).
-		Set("is_sorted = ?", false).
 		Where("id = ?", buahRawID).
+		Where("lot_id = ?", lotID).
 		Exec(ctx)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return err
 }
 
 func (r *lotRepository) GetItemCount(ctx context.Context, lotID string) (int, error) {
 	count, err := r.db.InitQuery(ctx).NewSelect().
-		Model((*domain.LotDetail)(nil)).
+		Model((*domain.BuahRaw)(nil)).
 		Where("lot_id = ?", lotID).
 		Count(ctx)
 	return count, err
+}
+
+func (r *lotRepository) GetTotalWeight(ctx context.Context, lotID string) (float64, error) {
+	var totalWeight float64
+	err := r.db.InitQuery(ctx).NewSelect().
+		Model((*domain.BuahRaw)(nil)).
+		ColumnExpr("COALESCE(SUM(berat), 0)").
+		Where("lot_id = ?", lotID).
+		Scan(ctx, &totalWeight)
+	return totalWeight, err
 }
 
 func (r *lotRepository) GetBuahRawByID(ctx context.Context, id string) (*domain.BuahRaw, error) {
@@ -166,15 +153,6 @@ func (r *lotRepository) GetBuahRawByID(ctx context.Context, id string) (*domain.
 	return buah, nil
 }
 
-func (r *lotRepository) UpdateBuahRawSorted(ctx context.Context, id string, isSorted bool) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().
-		Model((*domain.BuahRaw)(nil)).
-		Set("is_sorted = ?", isSorted).
-		Where("id = ?", id).
-		Exec(ctx)
-	return err
-}
-
 func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKode, grade string) (string, error) {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
@@ -182,8 +160,8 @@ func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKo
 	}
 	defer tx.Rollback()
 
-	// Pattern: KODE-GRADE-DDMMYY-%
-	prefix := fmt.Sprintf("%s-%s-%s", jenisKode, grade, dateStr)
+	// Pattern: LOT-KODE-GRADE-DDMMYY-%
+	prefix := fmt.Sprintf("LOT-%s-%s-%s", jenisKode, grade, dateStr)
 
 	var lot domain.StokLot
 	err = tx.NewSelect().
@@ -197,9 +175,9 @@ func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKo
 
 	nextSeq := 1
 	if err == nil && lot.Kode != "" {
-		// Extract number from KODE-GRADE-DDMMYY-SEQ
+		// Extract number from LOT-KODE-GRADE-DDMMYY-SEQ
 		var seq int
-		// prefix is "KODE-GRADE-DDMMYY", so full format is "prefix-%d"
+		// prefix is "LOT-KODE-GRADE-DDMMYY", so full format is "prefix-%d"
 		_, err = fmt.Sscanf(lot.Kode, prefix+"-%d", &seq)
 		if err == nil {
 			nextSeq = seq + 1

@@ -1,0 +1,16 @@
+
+DROP TABLE IF EXISTS tb_lot_detail;
+
+ALTER TABLE tb_buah_raw
+ADD COLUMN lot_id VARCHAR(27),
+ADD COLUMN berat NUMERIC(10, 2) DEFAULT 0,
+ADD COLUMN blok_id VARCHAR(27),
+DROP COLUMN IF EXISTS is_sorted;
+
+ALTER TABLE tb_buah_raw
+ADD CONSTRAINT fk_buah_raw_lot
+FOREIGN KEY (lot_id) REFERENCES tb_stok_lot(id) ON DELETE SET NULL;
+
+ALTER TABLE tb_buah_raw
+ADD CONSTRAINT fk_buah_raw_blok
+FOREIGN KEY (blok_id) REFERENCES blok(id) ON DELETE SET NULL;

@@ -79,7 +79,7 @@ func (r *buahRawRepository) GetUnsorted(ctx context.Context, filter map[string]i
 	q = r.applyRelations(q, filter)
 	q = r.applyFilters(q, filter)
 	q = q.Where("buah_raw.deleted_at IS NULL").
-		Where("buah_raw.is_sorted = false").
+		Where("buah_raw.lot_id IS NULL").
 		Order("buah_raw.created_at DESC")
 
 	count, err := q.Limit(limit).Offset(offset).ScanAndCount(ctx)
@@ -126,7 +126,14 @@ func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]i
 		q = q.Where("buah_raw.kode_buah LIKE ?", "%"+val+"%")
 	}
 	if val, ok := filter["is_sorted"]; ok {
-		q = q.Where("buah_raw.is_sorted = ?", val)
+		// Deprecated field, using lot_id check instead
+		if isSorted, valid := val.(bool); valid {
+			if isSorted {
+				q = q.Where("buah_raw.lot_id IS NOT NULL")
+			} else {
+				q = q.Where("buah_raw.lot_id IS NULL")
+			}
+		}
 	}
 	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
 		q = q.Where("pohon.blok_id = ?", val)
@@ -197,7 +204,6 @@ func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, prefix 
 		Model(&buah).
 		Column("kode_buah").
 		Where("kode_buah LIKE ?", fmt.Sprintf("%s-F%%", prefix)).
-		Where("tgl_panen = ?", tglPanen).
 		Order("kode_buah DESC").
 		Limit(1).
 		For("UPDATE").
@@ -290,13 +296,13 @@ func (r *buahRawRepository) GetLotDetails(ctx context.Context, lotID string) ([]
 
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(&buahList).
-		Join("INNER JOIN tb_lot_detail ON tb_lot_detail.buah_raw_id = buah_raw.id").
+		Relation("JenisDurianDetail").
 		Relation("PohonPanenDetail").
 		Relation("PohonPanenDetail.Blok").
 		Relation("PohonPanenDetail.Blok.Divisi").
 		Relation("PohonPanenDetail.Blok.Divisi.Estate").
 		Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
-		Where("tb_lot_detail.lot_id = ?", lotID).
+		Where("buah_raw.lot_id = ?", lotID).
 		Where("buah_raw.deleted_at IS NULL").
 		Scan(ctx)
 

@@ -20,6 +20,7 @@ type ShipmentResponse struct {
 type ShipmentItemResponse struct {
 	ID          string  `json:"id"`
 	LotID       string  `json:"lot_id"`
+	KodeLot     string  `json:"kode_lot"` // Added field
 	JenisDurian string  `json:"jenis_durian"`
 	Grade       string  `json:"grade"`
 	QtyAmbil    int     `json:"qty_ambil"`
@@ -36,16 +37,14 @@ func NewShipmentResponse(p *domain.Pengiriman) ShipmentResponse {
 	totalBerat := 0.0
 
 	for _, d := range p.Details {
-		totalItems++ // or d.QtyAmbil depending on definition, usually items count = rows
+		totalItems++
 		totalBerat += d.BeratAmbil
 	}
 
-	// If counting total quantity of fruits instead of rows:
-	// totalItems = 0
-	// for _, d := range p.Details { totalItems += d.QtyAmbil }
-	// Let's stick to rows for "items" or maybe query logic handles totals.
-	// Spec says: "total_items: 5 // Jumlah lot/detail". So it's row count.
-	// Wait, spec example says "total_items: 5". If it's number of lots, it's row count.
+	createdBy := p.CreatedBy
+	if p.Creator != nil {
+		createdBy = p.Creator.Email
+	}
 
 	return ShipmentResponse{
 		ID:         p.ID,
@@ -53,7 +52,7 @@ func NewShipmentResponse(p *domain.Pengiriman) ShipmentResponse {
 		Tujuan:     p.Tujuan,
 		TglKirim:   p.TglKirim,
 		Status:     p.Status,
-		CreatedBy:  p.CreatedBy,
+		CreatedBy:  createdBy,
 		TotalItems: len(p.Details),
 		TotalBerat: totalBerat,
 		CreatedAt:  p.CreatedAt,

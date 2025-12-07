@@ -82,7 +82,6 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 		JenisDurian: req.JenisDurianID,
 		PohonPanen:  pohonPanenID,
 		TglPanen:    tglPanen,
-		IsSorted:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -290,7 +289,6 @@ func (s *buahRawService) buildBuahRawListFromLocation(
 				JenisDurian: item.JenisDurianID,
 				PohonPanen:  &pohonID,
 				TglPanen:    tglPanen,
-				IsSorted:    false,
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}
@@ -426,8 +424,9 @@ func (s *buahRawService) mapToResponse(item domain.BuahRaw) response.BuahRawResp
 		JenisDurian: s.buildJenisDetail(item.JenisDurianDetail),
 		LokasiPanen: s.buildLokasiPanenFromPohon(item.PohonPanenDetail),
 		PohonPanen:  s.buildPohonKode(item.PohonPanenDetail, item.PohonPanen),
+		KodePohon:   s.buildKodePohon(item.PohonPanenDetail),
+		LotKode:     s.buildLotKode(item.Lot),
 		TglPanen:    item.TglPanen,
-		IsSorted:    item.IsSorted,
 		CreatedAt:   item.CreatedAt.Format(time.RFC3339),
 	}
 
@@ -485,6 +484,20 @@ func (s *buahRawService) buildPohonKode(detail *domain.Pohon, pohonPanen *string
 	}
 	if pohonPanen != nil {
 		return nil
+	}
+	return nil
+}
+
+func (s *buahRawService) buildKodePohon(detail *domain.Pohon) string {
+	if detail != nil {
+		return detail.Kode
+	}
+	return ""
+}
+
+func (s *buahRawService) buildLotKode(lot *domain.StokLot) *string {
+	if lot != nil {
+		return &lot.Kode
 	}
 	return nil
 }

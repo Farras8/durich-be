@@ -6,7 +6,9 @@ type LotCreateRequest struct {
 }
 
 type LotAddItemsRequest struct {
-	BuahRawIDs []string `json:"buah_raw_ids" binding:"required,min=1,dive,required"`
+	PohonKode string  `json:"pohon_kode" binding:"required"` // Kode pohon
+	BlokID    string  `json:"blok_id" binding:"required"`    // UUID blok
+	Berat     float64 `json:"berat" binding:"required,gt=0"`
 }
 
 type LotRemoveItemRequest struct {
@@ -14,5 +16,4 @@ type LotRemoveItemRequest struct {
 }
 
 type LotFinalizeRequest struct {
-	BeratAwal float64 `json:"berat_awal" binding:"required,gt=0"`
 }

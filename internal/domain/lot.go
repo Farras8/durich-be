@@ -24,7 +24,8 @@ type StokLot struct {
 	UpdatedAt     time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 	DeletedAt     *time.Time `bun:"" json:"deleted_at,omitempty"`
 
-	CurrentQty int `bun:",scanonly" json:"current_qty"`
+	CurrentQty   int     `bun:",scanonly" json:"current_qty"`
+	CurrentBerat float64 `bun:",scanonly" json:"current_berat"`
 
 	Items []LotDetail `bun:"rel:has-many,join:id=lot_id" json:"items,omitempty"`
 

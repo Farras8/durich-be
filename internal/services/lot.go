@@ -101,6 +101,7 @@ func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi
 			BeratSisa:       lot.BeratSisa,
 			QtySisa:         lot.QtySisa,
 			CurrentQty:      lot.CurrentQty,
+			CurrentBerat:    lot.CurrentBerat,
 			Status:          lot.Status,
 			CreatedAt:       lot.CreatedAt,
 		}
@@ -139,11 +140,18 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 				}
 			}
 
+			jenisDurianInfo := ""
+			if buah.JenisDurianDetail != nil {
+				jenisDurianInfo = fmt.Sprintf("%s - %s", buah.JenisDurianDetail.Kode, buah.JenisDurianDetail.NamaJenis)
+			}
+
 			items = append(items, response.LotItemResponse{
-				ID:       buah.ID,
-				KodeBuah: buah.KodeBuah,
-				TglPanen: buah.TglPanen,
-				AsalBlok: asalBlok,
+				ID:          buah.ID,
+				KodeBuah:    buah.KodeBuah,
+				TglPanen:    buah.TglPanen,
+				AsalBlok:    asalBlok,
+				Berat:       buah.Berat,
+				JenisDurian: jenisDurianInfo,
 			})
 		}
 	}
@@ -167,6 +175,7 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 			BeratSisa:       lot.BeratSisa,
 			QtySisa:         lot.QtySisa,
 			CurrentQty:      currentQty,
+			CurrentBerat:    lot.CurrentBerat,
 			Status:          lot.Status,
 			CreatedAt:       lot.CreatedAt,
 		},
@@ -184,22 +193,32 @@ func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.Lo
 		return nil, errors.New("hanya lot dengan status DRAFT yang bisa ditambahkan item")
 	}
 
-	for _, buahID := range req.BuahRawIDs {
-		buah, err := s.lotRepo.GetBuahRawByID(ctx, buahID)
-		if err != nil {
-			return nil, fmt.Errorf("buah dengan ID %s tidak ditemukan", buahID)
-		}
-
-		if buah.IsSorted {
-			return nil, fmt.Errorf("buah dengan ID %s sudah masuk lot lain", buahID)
-		}
-
-		if buah.JenisDurian != lot.JenisDurianID {
-			return nil, fmt.Errorf("buah %s memiliki jenis durian yang berbeda dengan lot ini", buah.KodeBuah)
-		}
+	pohon, err := s.lotRepo.GetPohonByKode(ctx, req.PohonKode, req.BlokID)
+	if err != nil {
+		return nil, fmt.Errorf("pohon dengan kode %s tidak ditemukan di blok yang dipilih", req.PohonKode)
 	}
 
-	err = s.lotRepo.AddItems(ctx, lotID, req.BuahRawIDs)
+	prefix := s.buildLocationPrefix(pohon)
+	tglPanen := time.Now().Format("2006-01-02")
+	
+	sequence, err := s.buahRawRepo.GetNextSequenceWithLock(ctx, prefix, tglPanen)
+	if err != nil {
+		return nil, fmt.Errorf("gagal generate sequence buah: %v", err)
+	}
+
+	kodeBuah := fmt.Sprintf("%s-F%05d", prefix, sequence)
+	
+	buah := &domain.BuahRaw{
+		KodeBuah:    kodeBuah,
+		JenisDurian: lot.JenisDurianID,
+		PohonPanen:  &pohon.ID,
+		TglPanen:    tglPanen,
+		LotID:       &lotID,
+		BlokID:      &req.BlokID,
+		Berat:       req.Berat,
+	}
+
+	err = s.lotRepo.AddBuah(ctx, buah)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +231,25 @@ func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.Lo
 	return &response.LotAddItemsResponse{
 		CurrentQty: count,
 	}, nil
+}
+
+func (s *lotService) buildLocationPrefix(pohon *domain.Pohon) string {
+	if pohon == nil || pohon.Blok == nil {
+		return ""
+	}
+
+	blok := pohon.Blok
+	if blok.Divisi == nil || blok.Divisi.Estate == nil || blok.Divisi.Estate.Company == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s%s%s%s%s",
+		blok.Divisi.Estate.Company.Kode,
+		blok.Divisi.Estate.Kode,
+		blok.Divisi.Kode,
+		blok.Kode,
+		pohon.Kode,
+	)
 }
 
 func (s *lotService) RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest) error {
@@ -246,9 +284,14 @@ func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.Lo
 		return nil, errors.New("lot harus memiliki minimal 1 item sebelum difinalisasi")
 	}
 
-	lot.BeratAwal = req.BeratAwal
+	totalWeight, err := s.lotRepo.GetTotalWeight(ctx, lotID)
+	if err != nil {
+		return nil, fmt.Errorf("gagal menghitung total berat: %v", err)
+	}
+
+	lot.BeratAwal = totalWeight
 	lot.QtyAwal = count
-	lot.BeratSisa = req.BeratAwal
+	lot.BeratSisa = totalWeight
 	lot.QtySisa = count
 	lot.Status = constants.LotStatusReady
 

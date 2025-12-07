@@ -13,6 +13,7 @@ type LotResponse struct {
 	BeratSisa       float64   `json:"berat_sisa"`
 	QtySisa         int       `json:"qty_sisa"`
 	CurrentQty      int       `json:"current_qty"`
+	CurrentBerat    float64   `json:"current_berat"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 }
@@ -23,10 +24,12 @@ type LotDetailResponse struct {
 }
 
 type LotItemResponse struct {
-	ID       string `json:"id"`
-	KodeBuah string `json:"kode_buah"`
-	TglPanen string `json:"tgl_panen"`
-	AsalBlok string `json:"asal_blok"`
+	ID          string  `json:"id"`
+	KodeBuah    string  `json:"kode_buah"`
+	TglPanen    string  `json:"tgl_panen"`
+	AsalBlok    string  `json:"asal_blok"`
+	Berat       float64 `json:"berat"`
+	JenisDurian string  `json:"jenis_durian"` // Format: "KODE - Nama Jenis"
 }
 
 type LotAddItemsResponse struct {

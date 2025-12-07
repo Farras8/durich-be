@@ -60,6 +60,7 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string,
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&shipments).
 		Relation("Details").
+		Relation("Creator").
 		Where("p.deleted_at IS NULL")
 
 	if tujuan != "" {
@@ -227,6 +228,7 @@ func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Check for empty lots
 	var emptyLotIDs []string
 	for _, d := range details {
 		lot := new(domain.StokLot)
