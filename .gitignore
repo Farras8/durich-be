@@ -15,6 +15,7 @@
 go.work
 .env
 env.yaml
+go.mod
 *.log
 .vscode/
 .DS_Store
