@@ -10,7 +10,7 @@ import (
 type LotRepository interface {
 	Create(ctx context.Context, lot *domain.StokLot) error
 	GetByID(ctx context.Context, id string) (*domain.StokLot, error)
-	GetList(ctx context.Context, status, jenisDurianID, kondisi string) ([]domain.StokLot, error)
+	GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]domain.StokLot, error)
 	Update(ctx context.Context, lot *domain.StokLot) error
 	AddBuah(ctx context.Context, buah *domain.BuahRaw) error
 	RemoveItem(ctx context.Context, lotID, buahRawID string) error
@@ -52,16 +52,20 @@ func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot
 	return lot, nil
 }
 
-func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kondisi string) ([]domain.StokLot, error) {
+func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]domain.StokLot, error) {
 	var lots []domain.StokLot
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&lots).
 		Relation("JenisDurianDetail").
+		Relation("Posisi").
 		ColumnExpr("stok_lot.*").
 		ColumnExpr("(SELECT COUNT(*) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_qty").
 		ColumnExpr("(SELECT COALESCE(SUM(berat), 0) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_berat").
 		Where("stok_lot.deleted_at IS NULL")
 
+	if locationID != "" {
+		query = query.Where("stok_lot.current_location_id = ?", locationID)
+	}
 	if status != "" {
 		query = query.Where("stok_lot.status = ?", status)
 	}

@@ -7,18 +7,19 @@ import (
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/dto/response"
 	"durich-be/internal/repository"
-	"errors"
+	"durich-be/pkg/errors"
 	"fmt"
 	"time"
+	std_errors "errors"
 )
 
 type LotService interface {
-	Create(ctx context.Context, req requests.LotCreateRequest) (*response.LotResponse, error)
-	GetList(ctx context.Context, status, jenisDurian, kondisi string) ([]response.LotResponse, error)
+	Create(ctx context.Context, req requests.LotCreateRequest, locationID string) (*response.LotResponse, error)
+	GetList(ctx context.Context, status, jenisDurian, kondisi, locationID string) ([]response.LotResponse, error)
 	GetDetail(ctx context.Context, id string) (*response.LotDetailResponse, error)
-	AddItems(ctx context.Context, lotID string, req requests.LotAddItemsRequest) (*response.LotAddItemsResponse, error)
-	RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest) error
-	Finalize(ctx context.Context, lotID string, req requests.LotFinalizeRequest) (*response.LotFinalizeResponse, error)
+	AddItems(ctx context.Context, lotID string, req requests.LotAddItemsRequest, locationID string) (*response.LotAddItemsResponse, error)
+	RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest, locationID string) error
+	Finalize(ctx context.Context, lotID string, req requests.LotFinalizeRequest, locationID string) (*response.LotFinalizeResponse, error)
 }
 
 type lotService struct {
@@ -33,7 +34,12 @@ func NewLotService(lotRepo repository.LotRepository, buahRawRepo repository.Buah
 	}
 }
 
-func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest) (*response.LotResponse, error) {
+func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest, locationID string) (*response.LotResponse, error) {
+	// Validation: Only Central Users can create lots
+	if locationID != "" {
+		return nil, errors.ValidationError("akses ditolak: hanya pusat yang dapat membuat lot baru (grading)")
+	}
+
 	// Get jenis durian detail first to get code
 	jenis, err := s.buahRawRepo.GetJenisDurianByID(ctx, req.JenisDurianID)
 	if err != nil {
@@ -77,8 +83,8 @@ func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest) 
 	}, nil
 }
 
-func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi string) ([]response.LotResponse, error) {
-	lots, err := s.lotRepo.GetList(ctx, status, jenisDurianID, kondisi)
+func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]response.LotResponse, error) {
+	lots, err := s.lotRepo.GetList(ctx, status, jenisDurianID, kondisi, locationID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,14 +189,19 @@ func (s *lotService) GetDetail(ctx context.Context, id string) (*response.LotDet
 	}, nil
 }
 
-func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.LotAddItemsRequest) (*response.LotAddItemsResponse, error) {
+func (s *lotService) AddItems(ctx context.Context, lotID string, req requests.LotAddItemsRequest, locationID string) (*response.LotAddItemsResponse, error) {
+	// Validation: Only Central Users can modify lots
+	if locationID != "" {
+		return nil, errors.ValidationError("akses ditolak: hanya pusat yang dapat memodifikasi lot")
+	}
+
 	lot, err := s.lotRepo.GetByID(ctx, lotID)
 	if err != nil {
 		return nil, err
 	}
 
 	if lot.Status != constants.LotStatusDraft {
-		return nil, errors.New("hanya lot dengan status DRAFT yang bisa ditambahkan item")
+		return nil, std_errors.New("hanya lot dengan status DRAFT yang bisa ditambahkan item")
 	}
 
 	pohon, err := s.lotRepo.GetPohonByKode(ctx, req.PohonKode, req.BlokID)
@@ -252,27 +263,37 @@ func (s *lotService) buildLocationPrefix(pohon *domain.Pohon) string {
 	)
 }
 
-func (s *lotService) RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest) error {
+func (s *lotService) RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest, locationID string) error {
+	// Validation: Only Central Users can modify lots
+	if locationID != "" {
+		return errors.ValidationError("akses ditolak: hanya pusat yang dapat memodifikasi lot")
+	}
+
 	lot, err := s.lotRepo.GetByID(ctx, lotID)
 	if err != nil {
 		return err
 	}
 
 	if lot.Status != constants.LotStatusDraft {
-		return errors.New("hanya lot dengan status DRAFT yang bisa dikurangi item")
+		return std_errors.New("hanya lot dengan status DRAFT yang bisa dikurangi item")
 	}
 
 	return s.lotRepo.RemoveItem(ctx, lotID, req.BuahRawID)
 }
 
-func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.LotFinalizeRequest) (*response.LotFinalizeResponse, error) {
+func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.LotFinalizeRequest, locationID string) (*response.LotFinalizeResponse, error) {
+	// Validation: Only Central Users can finalize lots
+	if locationID != "" {
+		return nil, errors.ValidationError("akses ditolak: hanya pusat yang dapat memfinalisasi lot")
+	}
+
 	lot, err := s.lotRepo.GetByID(ctx, lotID)
 	if err != nil {
 		return nil, err
 	}
 
 	if lot.Status != constants.LotStatusDraft {
-		return nil, errors.New("hanya lot dengan status DRAFT yang bisa difinalisasi")
+		return nil, std_errors.New("hanya lot dengan status DRAFT yang bisa difinalisasi")
 	}
 
 	count, err := s.lotRepo.GetItemCount(ctx, lotID)
@@ -281,7 +302,7 @@ func (s *lotService) Finalize(ctx context.Context, lotID string, req requests.Lo
 	}
 
 	if count == 0 {
-		return nil, errors.New("lot harus memiliki minimal 1 item sebelum difinalisasi")
+		return nil, std_errors.New("lot harus memiliki minimal 1 item sebelum difinalisasi")
 	}
 
 	totalWeight, err := s.lotRepo.GetTotalWeight(ctx, lotID)

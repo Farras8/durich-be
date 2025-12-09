@@ -12,10 +12,10 @@ import (
 
 type SalesService interface {
 	Create(ctx context.Context, req requests.SalesCreateRequest) (*response.SalesResponse, error)
-	GetList(ctx context.Context, startDate, endDate, tipeJual string) ([]response.SalesResponse, error)
+	GetList(ctx context.Context, startDate, endDate, tipeJual, locationID string) ([]response.SalesResponse, error)
 	GetByID(ctx context.Context, id string) (*response.SalesDetailResponse, error)
 	Update(ctx context.Context, id string, req requests.SalesUpdateRequest) error
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string, locationID string, userRole string) error
 }
 
 type salesService struct {
@@ -64,8 +64,8 @@ func (s *salesService) Create(ctx context.Context, req requests.SalesCreateReque
 	return &resp, nil
 }
 
-func (s *salesService) GetList(ctx context.Context, startDate, endDate, tipeJual string) ([]response.SalesResponse, error) {
-	salesList, err := s.repo.GetList(ctx, startDate, endDate, tipeJual)
+func (s *salesService) GetList(ctx context.Context, startDate, endDate, tipeJual, locationID string) ([]response.SalesResponse, error) {
+	salesList, err := s.repo.GetList(ctx, startDate, endDate, tipeJual, locationID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +139,15 @@ func (s *salesService) Update(ctx context.Context, id string, req requests.Sales
 	return s.repo.Update(ctx, sales)
 }
 
-func (s *salesService) Delete(ctx context.Context, id string) error {
+func (s *salesService) Delete(ctx context.Context, id string, locationID string, userRole string) error {
+	// Validation:
+	// 1. Central Users (LocationID == "") -> Allow All
+	// 2. Branch Admin (LocationID != "" AND Role == "admin") -> Allow
+	// 3. Branch Sales (LocationID != "" AND Role == "sales") -> Deny
+
+	if locationID != "" && userRole != "admin" {
+		return errors.ValidationError("akses ditolak: hanya admin cabang atau pusat yang dapat menghapus data penjualan")
+	}
+
 	return s.repo.Delete(ctx, id)
 }

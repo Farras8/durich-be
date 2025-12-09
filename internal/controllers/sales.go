@@ -3,6 +3,7 @@ package controllers
 import (
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
+	"durich-be/pkg/authentication"
 	"durich-be/pkg/errors"
 	"durich-be/pkg/http/response"
 	"durich-be/pkg/utils"
@@ -40,7 +41,10 @@ func (c *SalesController) GetList(ctx *gin.Context) {
 	endDate := ctx.Query("end_date")
 	tipeJual := ctx.Query("tipe_jual")
 
-	res, err := c.service.GetList(ctx.Request.Context(), startDate, endDate, tipeJual)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	res, err := c.service.GetList(ctx.Request.Context(), startDate, endDate, tipeJual, locationID)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
@@ -78,7 +82,17 @@ func (c *SalesController) Update(ctx *gin.Context) {
 
 func (c *SalesController) Delete(ctx *gin.Context) {
 	id := ctx.Param("id")
-	if err := c.service.Delete(ctx.Request.Context(), id); err != nil {
+
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+	
+	// Get user role from auth token
+	userRole := ""
+	if len(userAuth.Role) > 0 {
+		userRole = string(userAuth.Role[0])
+	}
+
+	if err := c.service.Delete(ctx.Request.Context(), id, locationID, userRole); err != nil {
 		response.SendError(ctx, err)
 		return
 	}

@@ -1,0 +1,1 @@
+ALTER TABLE tb_stok_lot ADD COLUMN current_location_id VARCHAR(27);

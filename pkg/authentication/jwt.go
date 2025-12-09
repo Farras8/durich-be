@@ -87,6 +87,7 @@ func (m *JWTManager) generateAccessToken(auth requests.UserAuth) (string, error)
 			UserID:         auth.UserID,
 			Email:          auth.Email,
 			Role:           auth.Role,
+			LocationID:     auth.LocationID,
 			RefreshTokenID: auth.RefreshTokenID,
 		},
 		RegisteredClaims: jwt.RegisteredClaims{

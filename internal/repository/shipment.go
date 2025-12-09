@@ -15,13 +15,14 @@ import (
 type ShipmentRepository interface {
 	Create(ctx context.Context, shipment *domain.Pengiriman) error
 	GetByID(ctx context.Context, id string) (*domain.Pengiriman, error)
-	GetList(ctx context.Context, tujuan, status string, page, limit int) ([]domain.Pengiriman, int64, error)
-	AddItem(ctx context.Context, detail *domain.PengirimanDetail) error
+	GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]domain.Pengiriman, int64, error)
+	AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error
 	RemoveItem(ctx context.Context, shipmentID, detailID string) error
 	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
 	Finalize(ctx context.Context, id string) error
 	GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error)
 	GetNextShipmentKode(ctx context.Context) (string, error)
+	Receive(ctx context.Context, id string, updates map[string]float64, tujuanID string) error
 }
 
 type shipmentRepository struct {
@@ -45,6 +46,7 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 		Relation("Details.Lot").
 		Relation("Details.Lot.JenisDurianDetail").
 		Relation("Creator").
+		Relation("TujuanDetail").
 		Where("p.id = ?", id).
 		Where("p.deleted_at IS NULL").
 		Scan(ctx)
@@ -54,14 +56,23 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 	return shipment, nil
 }
 
-func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string, page, limit int) ([]domain.Pengiriman, int64, error) {
+func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]domain.Pengiriman, int64, error) {
 	var shipments []domain.Pengiriman
 
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&shipments).
 		Relation("Details").
 		Relation("Creator").
+		Relation("TujuanDetail").
 		Where("p.deleted_at IS NULL")
+
+	if locationID != "" {
+		// Filter shipments where destination is locationID OR creator is from locationID
+		query = query.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Where("p.tujuan_id = ?", locationID).
+				WhereOr("creator.current_location_id = ?", locationID)
+		})
+	}
 
 	if tujuan != "" {
 		query = query.Where("p.tujuan ILIKE ?", "%"+tujuan+"%")
@@ -86,20 +97,25 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status string,
 	return shipments, int64(total), nil
 }
 
-func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.PengirimanDetail) error {
+func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	// Check Shipment Status
 	var shipmentStatus string
+	var shipmentCreatorLocation *string
 	err = tx.NewSelect().
 		Model((*domain.Pengiriman)(nil)).
 		Column("status").
-		Where("id = ?", detail.PengirimanID).
-		Where("deleted_at IS NULL").
-		Scan(ctx, &shipmentStatus)
+		ColumnExpr("creator.current_location_id").
+		Join("JOIN users AS creator ON creator.id = p.created_by").
+		Where("p.id = ?", detail.PengirimanID).
+		Where("p.deleted_at IS NULL").
+		Scan(ctx, &shipmentStatus, &shipmentCreatorLocation)
+	
 	if err != nil {
 		return errors.New("shipment not found")
 	}
@@ -107,30 +123,47 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 		return errors.New("shipment must be DRAFT to add items")
 	}
 
+	// Validate Access: User can only modify shipments they have access to
+	// (Though Controller/Service usually handles this, double check here is safe)
+	
+	// Fetch Lot & Validate Location
 	lot := new(domain.StokLot)
-	err = tx.NewSelect().
+	query := tx.NewSelect().
 		Model(lot).
 		Where("id = ?", detail.LotSumberID).
 		Where("status = ?", constants.LotStatusReady).
-		Where("qty_sisa >= ?", detail.QtyAmbil).
-		Where("berat_sisa >= ?", detail.BeratAmbil).
-		For("UPDATE").
-		Scan(ctx)
-	if err != nil {
-		return errors.New("lot not found, not in READY status, or insufficient quantity/weight")
+		For("UPDATE")
+
+	// Strict Location Check:
+	// If User is Central (locationID == ""), they can only pick Central Lots (current_location_id IS NULL)
+	// If User is Branch (locationID != ""), they can only pick Branch Lots (current_location_id == locationID)
+	if locationID == "" {
+		query = query.Where("current_location_id IS NULL")
+	} else {
+		query = query.Where("current_location_id = ?", locationID)
 	}
+
+	err = query.Scan(ctx)
+	if err != nil {
+		return errors.New("lot not found, not in READY status, or belongs to another location")
+	}
+
+	detail.QtyAmbil = lot.QtySisa
+	detail.BeratAmbil = lot.BeratSisa
 
 	_, err = tx.NewInsert().Model(detail).Exec(ctx)
 	if err != nil {
 		return err
 	}
 
-	lot.QtySisa -= detail.QtyAmbil
-	lot.BeratSisa -= detail.BeratAmbil
+	lot.Status = constants.LotStatusBooked
+	// Set sisa to 0 to prevent usage
+	lot.QtySisa = 0
+	lot.BeratSisa = 0
 
 	_, err = tx.NewUpdate().
 		Model(lot).
-		Column("qty_sisa", "berat_sisa").
+		Column("status", "qty_sisa", "berat_sisa").
 		WherePK().
 		Exec(ctx)
 	if err != nil {
@@ -177,12 +210,14 @@ func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailI
 		return err
 	}
 
-	lot.QtySisa += detail.QtyAmbil
-	lot.BeratSisa += detail.BeratAmbil
+	// Restore original quantity and weight
+	lot.QtySisa = detail.QtyAmbil
+	lot.BeratSisa = detail.BeratAmbil
+	lot.Status = constants.LotStatusReady
 
 	_, err = tx.NewUpdate().
 		Model(lot).
-		Column("qty_sisa", "berat_sisa").
+		Column("qty_sisa", "berat_sisa", "status").
 		WherePK().
 		Exec(ctx)
 	if err != nil {
@@ -245,7 +280,7 @@ func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
 	if len(emptyLotIDs) > 0 {
 		_, err = tx.NewUpdate().
 			Model((*domain.StokLot)(nil)).
-			Set("status = ?", constants.LotStatusEmpty).
+			Set("status = ?", constants.LotStatusShipped).
 			Where("id IN (?)", bun.In(emptyLotIDs)).
 			Exec(ctx)
 		if err != nil {
@@ -292,4 +327,38 @@ func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context) (string, e
 	}
 
 	return fmt.Sprintf("%s-%03d", prefix, seq), nil
+}
+
+func (r *shipmentRepository) Receive(ctx context.Context, id string, updates map[string]float64, tujuanID string) error {
+	tx, err := r.db.InitQuery(ctx).Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Update Shipment Status
+	_, err = tx.NewUpdate().
+		Model((*domain.Pengiriman)(nil)).
+		Set("status = ?", constants.ShipmentStatusReceived).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Update Lots
+	for lotID, berat := range updates {
+		_, err := tx.NewUpdate().
+			Model((*domain.StokLot)(nil)).
+			Set("current_location_id = ?", tujuanID).
+			Set("berat_sisa = ?", berat).
+			Set("status = ?", constants.LotStatusReady).
+			Where("id = ?", lotID).
+			Exec(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

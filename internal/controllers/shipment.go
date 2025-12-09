@@ -50,7 +50,10 @@ func (c *ShipmentController) GetList(ctx *gin.Context) {
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
 
-	res, total, err := c.service.GetList(ctx.Request.Context(), tujuan, status, page, limit)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	res, total, err := c.service.GetList(ctx.Request.Context(), tujuan, status, locationID, page, limit)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
@@ -86,7 +89,10 @@ func (c *ShipmentController) AddItem(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.service.AddItem(ctx.Request.Context(), id, req); err != nil {
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	if err := c.service.AddItem(ctx.Request.Context(), id, req, locationID); err != nil {
 		response.SendError(ctx, err)
 		return
 	}
@@ -130,6 +136,23 @@ func (c *ShipmentController) UpdateStatus(ctx *gin.Context) {
 	}
 
 	response.SendSuccess(ctx, http.StatusOK, "Shipment status updated successfully", nil)
+}
+
+func (c *ShipmentController) Receive(ctx *gin.Context) {
+	id := ctx.Param("id")
+	var req requests.ShipmentReceiveRequest
+	if err := utils.BindData(ctx, &req); err != nil {
+		response.SendError(ctx, errors.ValidationErrorToAppError(err))
+		return
+	}
+
+	err := c.service.Receive(ctx.Request.Context(), id, req)
+	if err != nil {
+		response.SendError(ctx, err)
+		return
+	}
+
+	response.SendSuccess(ctx, http.StatusOK, "Shipment received successfully", nil)
 }
 
 func (c *ShipmentController) Finalize(ctx *gin.Context) {

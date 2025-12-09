@@ -36,7 +36,7 @@ func (r *authenticationRepository) GetByEmail(ctx context.Context, email string)
 		Model(&data).
 		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
 		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Column("id", "email", "role_system")
+			return q.Column("id", "email", "role_system", "current_location_id")
 		}).
 		Where("user_email = ?", email).
 		Scan(ctx)
@@ -49,7 +49,7 @@ func (r *authenticationRepository) GetByUserEmail(ctx context.Context, userEmail
 		Model(&data).
 		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
 		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Column("id", "email", "role_system")
+			return q.Column("id", "email", "role_system", "current_location_id")
 		}).
 		Where("user_email = ?", userEmail).
 		Scan(ctx)
@@ -62,7 +62,7 @@ func (r *authenticationRepository) GetByID(ctx context.Context, id string) (doma
 		Model(&data).
 		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
 		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Column("id", "email", "role_system")
+			return q.Column("id", "email", "role_system", "current_location_id")
 		}).
 		Where("authentication.id = ?", id).
 		Scan(ctx)
@@ -75,7 +75,7 @@ func (r *authenticationRepository) GetByRefreshTokenID(ctx context.Context, toke
 		Model(&data).
 		Column("id", "user_email", "password", "encrypted_password", "refresh_token_id", "created_at", "updated_at").
 		Relation("User", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Column("id", "email", "role_system")
+			return q.Column("id", "email", "role_system", "current_location_id")
 		}).
 		Where("authentication.refresh_token_id = ?", tokenID).
 		Scan(ctx)

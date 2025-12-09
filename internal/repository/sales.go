@@ -5,11 +5,13 @@ import (
 	"durich-be/internal/constants"
 	"durich-be/internal/domain"
 	"durich-be/pkg/database"
+
+	"github.com/uptrace/bun"
 )
 
 type SalesRepository interface {
 	Create(ctx context.Context, sales *domain.Penjualan) error
-	GetList(ctx context.Context, startDate, endDate, tipeJual string) ([]domain.Penjualan, error)
+	GetList(ctx context.Context, startDate, endDate, tipeJual, locationID string) ([]domain.Penjualan, error)
 	GetByID(ctx context.Context, id string) (*domain.Penjualan, error)
 	Update(ctx context.Context, sales *domain.Penjualan) error
 	Delete(ctx context.Context, id string) error
@@ -33,11 +35,13 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 	}
 	defer tx.Rollback()
 
+	// 1. Create Sales Record
 	_, err = tx.NewInsert().Model(sales).Exec(ctx)
 	if err != nil {
 		return err
 	}
 
+	// 2. Update Shipment Status -> COMPLETED
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
 		Set("status = ?", constants.ShipmentStatusCompleted).
@@ -47,15 +51,44 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 		return err
 	}
 
+	// 3. Get Lot IDs from Shipment Details
+	var detailIDs []string
+	err = tx.NewSelect().
+		Model((*domain.PengirimanDetail)(nil)).
+		Column("lot_sumber_id").
+		Where("pengiriman_id = ?", sales.PengirimanID).
+		Scan(ctx, &detailIDs)
+	if err != nil {
+		return err
+	}
+
+	// 4. Update Lot Status -> SOLD
+	if len(detailIDs) > 0 {
+		_, err = tx.NewUpdate().
+			Model((*domain.StokLot)(nil)).
+			Set("status = ?", constants.LotStatusSold).
+			Where("id IN (?)", bun.In(detailIDs)).
+			Exec(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
-func (r *salesRepository) GetList(ctx context.Context, startDate, endDate, tipeJual string) ([]domain.Penjualan, error) {
+func (r *salesRepository) GetList(ctx context.Context, startDate, endDate, tipeJual, locationID string) ([]domain.Penjualan, error) {
 	var sales []domain.Penjualan
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&sales).
 		Relation("Pengiriman").
 		Where("penjualan.deleted_at IS NULL")
+
+	if locationID != "" {
+		query = query.Join("JOIN tb_pengiriman AS p ON p.id = penjualan.pengiriman_id").
+			Join("JOIN users AS u ON u.id = p.created_by").
+			Where("u.current_location_id = ?", locationID)
+	}
 
 	if startDate != "" {
 		query = query.Where("penjualan.created_at >= ?", startDate)

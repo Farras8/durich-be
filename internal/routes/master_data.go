@@ -13,8 +13,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	companyGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		companyGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreateCompany)
-		companyGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetCompanies)
-		companyGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetCompanyByID)
+		companyGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetCompanies)
+		companyGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetCompanyByID)
 		companyGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdateCompany)
 		companyGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeleteCompany)
 	}
@@ -23,8 +23,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	estateGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		estateGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreateEstate)
-		estateGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetEstates)
-		estateGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetEstateByID)
+		estateGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetEstates)
+		estateGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetEstateByID)
 		estateGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdateEstate)
 		estateGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeleteEstate)
 	}
@@ -33,8 +33,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	divisiGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		divisiGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreateDivisi)
-		divisiGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetDivisiList)
-		divisiGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetDivisiByID)
+		divisiGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetDivisiList)
+		divisiGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetDivisiByID)
 		divisiGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdateDivisi)
 		divisiGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeleteDivisi)
 	}
@@ -43,8 +43,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	blokGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		blokGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreateBlok)
-		blokGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetBloks)
-		blokGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetBlokByID)
+		blokGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetBloks)
+		blokGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetBlokByID)
 		blokGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdateBlok)
 		blokGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeleteBlok)
 	}
@@ -53,8 +53,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	jenisDurianGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		jenisDurianGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreateJenisDurian)
-		jenisDurianGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetJenisDurianList)
-		jenisDurianGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetJenisDurianByID)
+		jenisDurianGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetJenisDurianList)
+		jenisDurianGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetJenisDurianByID)
 		jenisDurianGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdateJenisDurian)
 		jenisDurianGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeleteJenisDurian)
 	}
@@ -63,8 +63,8 @@ func RegisterMasterData(router *gin.RouterGroup, ctl controllers.MasterDataContr
 	pohonGroup.Use(middlewares.TokenAuthMiddleware())
 	{
 		pohonGroup.POST("", middlewares.RoleHandler(domain.RoleAdmin), ctl.CreatePohon)
-		pohonGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetPohonList)
-		pohonGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse), ctl.GetPohonByID)
+		pohonGroup.GET("", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetPohonList)
+		pohonGroup.GET("/:id", middlewares.RoleHandler(domain.RoleAdmin, domain.RoleWarehouse, domain.RoleSales), ctl.GetPohonByID)
 		pohonGroup.PUT("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.UpdatePohon)
 		pohonGroup.DELETE("/:id", middlewares.RoleHandler(domain.RoleAdmin), ctl.DeletePohon)
 	}

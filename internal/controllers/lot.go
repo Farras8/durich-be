@@ -3,6 +3,8 @@ package controllers
 import (
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
+	"durich-be/pkg/authentication"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +30,10 @@ func (c *LotController) Create(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.lotService.Create(ctx.Request.Context(), req)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	result, err := c.lotService.Create(ctx.Request.Context(), req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -49,7 +54,13 @@ func (c *LotController) GetList(ctx *gin.Context) {
 	jenisDurianID := ctx.Query("jenis_durian_id")
 	kondisi := ctx.Query("kondisi")
 
-	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	// DEBUG LOG
+	fmt.Printf("[DEBUG] LotController.GetList - UserID: %s, LocationID: '%s'\n", userAuth.UserID, locationID)
+
+	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -94,7 +105,10 @@ func (c *LotController) AddItems(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.lotService.AddItems(ctx.Request.Context(), id, req)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	result, err := c.lotService.AddItems(ctx.Request.Context(), id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -122,7 +136,10 @@ func (c *LotController) RemoveItem(ctx *gin.Context) {
 		return
 	}
 
-	err := c.lotService.RemoveItem(ctx.Request.Context(), id, req)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	err := c.lotService.RemoveItem(ctx.Request.Context(), id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -143,7 +160,10 @@ func (c *LotController) Finalize(ctx *gin.Context) {
 	// No body required for Finalize
 	req := requests.LotFinalizeRequest{}
 
-	result, err := c.lotService.Finalize(ctx.Request.Context(), id, req)
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	result, err := c.lotService.Finalize(ctx.Request.Context(), id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",

@@ -18,6 +18,7 @@ func RegisterShipment(router *gin.RouterGroup, ctl *controllers.ShipmentControll
 		group.POST("/:id/items", ctl.AddItem)
 		group.DELETE("/:id/items", ctl.RemoveItem)
 		group.POST("/:id/finalize", ctl.Finalize)
+		group.POST("/:id/receive", ctl.Receive)
 	}
 
 	salesGroup := router.Group("/shipments")

@@ -64,10 +64,16 @@ func (a *authService) registerUser(
 				return err
 			}
 
+			var locationID *string
+			if payload.LocationID != "" {
+				locationID = &payload.LocationID
+			}
+
 			newUser := &domain.User{
-				ID:         ksuid.New().String(),
-				Email:      payload.Email,
-				RoleSystem: []domain.UserRole{role},
+				ID:                ksuid.New().String(),
+				Email:             payload.Email,
+				RoleSystem:        []domain.UserRole{role},
+				CurrentLocationID: locationID,
 			}
 
 			err = a.userRepo.Create(ctx, newUser)

@@ -42,6 +42,7 @@ func TokenAuthMiddleware() gin.HandlerFunc {
 			UserID:         accessToken.UserID,
 			Email:          accessToken.Email,
 			Role:           accessToken.Role,
+			LocationID:     accessToken.LocationID,
 			RefreshTokenID: accessToken.RefreshTokenID,
 		})
 

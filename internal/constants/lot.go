@@ -1,7 +1,10 @@
 package constants
 
 const (
-	LotStatusDraft = "DRAFT"
-	LotStatusReady = "READY"
-	LotStatusEmpty = "EMPTY"
+	LotStatusDraft   = "DRAFT"
+	LotStatusReady   = "READY"
+	LotStatusBooked  = "BOOKED"
+	LotStatusShipped = "SHIPPED"
+	LotStatusSold    = "SOLD"
+	LotStatusEmpty   = "EMPTY"
 )

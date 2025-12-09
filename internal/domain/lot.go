@@ -20,6 +20,7 @@ type StokLot struct {
 	BeratSisa     float64    `bun:",default:0" json:"berat_sisa"`
 	QtySisa       int        `bun:",default:0" json:"qty_sisa"`
 	Status        string     `bun:",default:'DRAFT'" json:"status"`
+	PosisiID      *string    `bun:"current_location_id,nullzero" json:"posisi_id"`
 	CreatedAt     time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 	DeletedAt     *time.Time `bun:"" json:"deleted_at,omitempty"`
@@ -29,7 +30,8 @@ type StokLot struct {
 
 	Items []LotDetail `bun:"rel:has-many,join:id=lot_id" json:"items,omitempty"`
 
-	JenisDurianDetail *JenisDurian `bun:"rel:belongs-to,join:jenis_durian_id=id" json:"jenis_durian_detail,omitempty"`
+	JenisDurianDetail *JenisDurian      `bun:"rel:belongs-to,join:jenis_durian_id=id" json:"jenis_durian_detail,omitempty"`
+	Posisi            *TujuanPengiriman `bun:"rel:belongs-to,join:current_location_id=id" json:"posisi,omitempty"`
 }
 
 type LotDetail struct {
