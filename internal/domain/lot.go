@@ -21,6 +21,7 @@ type StokLot struct {
 	QtySisa       int        `bun:",default:0" json:"qty_sisa"`
 	Status        string     `bun:",default:'DRAFT'" json:"status"`
 	PosisiID      *string    `bun:"current_location_id,nullzero" json:"posisi_id"`
+	ArrivedAt     *time.Time `bun:",nullzero" json:"arrived_at,omitempty"`
 	CreatedAt     time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt     time.Time  `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 	DeletedAt     *time.Time `bun:"" json:"deleted_at,omitempty"`

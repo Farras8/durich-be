@@ -7,9 +7,10 @@ type RegisterResponse struct {
 }
 
 type LoginResponse struct {
-	AccessToken  string            `json:"access_token"`
-	RefreshToken string            `json:"refresh_token"`
-	Roles        []domain.UserRole `json:"roles"`
+	AccessToken       string            `json:"access_token"`
+	RefreshToken      string            `json:"refresh_token"`
+	Roles             []domain.UserRole `json:"roles"`
+	CurrentLocationID *string           `json:"current_location_id"`
 }
 
 type RefreshTokenResponse struct {

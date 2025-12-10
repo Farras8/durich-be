@@ -17,6 +17,7 @@ type Pengiriman struct {
 	Tujuan    string            `bun:",notnull" json:"tujuan"`
 	TglKirim  time.Time         `bun:",notnull" json:"tgl_kirim"`
 	Status    string            `bun:",default:'SENT'" json:"status"`
+	ReceivedAt *time.Time       `bun:",nullzero" json:"received_at,omitempty"`
 	CreatedBy string            `bun:",notnull" json:"created_by"`
 	CreatedAt time.Time         `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt time.Time         `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`

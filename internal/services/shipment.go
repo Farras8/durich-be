@@ -13,7 +13,7 @@ import (
 
 type ShipmentService interface {
 	Create(ctx context.Context, req requests.ShipmentCreateRequest, userID string) (*response.ShipmentResponse, error)
-	GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]response.ShipmentResponse, int64, error)
+	GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]response.ShipmentResponse, int64, error)
 	GetByID(ctx context.Context, id string) (*response.ShipmentDetailResponse, error)
 	AddItem(ctx context.Context, shipmentID string, req requests.ShipmentAddItemRequest, locationID string) error
 	RemoveItem(ctx context.Context, shipmentID string, detailID string) error
@@ -74,7 +74,7 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	return &resp, nil
 }
 
-func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]response.ShipmentResponse, int64, error) {
+func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]response.ShipmentResponse, int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -85,7 +85,7 @@ func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationI
 		limit = 20
 	}
 
-	shipments, total, err := s.repo.GetList(ctx, tujuan, status, locationID, page, limit)
+	shipments, total, err := s.repo.GetList(ctx, tujuan, status, locationID, listType, page, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -236,18 +236,28 @@ func (s *shipmentService) Receive(ctx context.Context, id string, req requests.S
 	}
 
 	// 4. Validate Items and Prepare Updates
-	updates := make(map[string]float64)
-	existingLots := make(map[string]bool)
+	updates := make(map[string]repository.ShipmentReceiveItem)
+	existingLots := make(map[string]domain.PengirimanDetail)
 
 	for _, detail := range shipment.Details {
-		existingLots[detail.LotSumberID] = true
+		existingLots[detail.LotSumberID] = detail
 	}
 
 	for _, item := range req.Details {
-		if !existingLots[item.LotID] {
+		detail, exists := existingLots[item.LotID]
+		if !exists {
 			return errors.ValidationError("lot id " + item.LotID + " is not part of this shipment")
 		}
-		updates[item.LotID] = item.BeratDiterima
+
+		finalQty := detail.QtyAmbil
+		if item.QtyDiterima != nil {
+			finalQty = *item.QtyDiterima
+		}
+
+		updates[item.LotID] = repository.ShipmentReceiveItem{
+			Berat: item.BeratDiterima,
+			Qty:   finalQty,
+		}
 	}
 
 	if len(updates) != len(shipment.Details) {
@@ -255,5 +265,5 @@ func (s *shipmentService) Receive(ctx context.Context, id string, req requests.S
 	}
 
 	// 5. Execute Updates
-	return s.repo.Receive(ctx, id, updates, shipment.TujuanID)
+	return s.repo.Receive(ctx, id, updates, shipment.TujuanID, req.ReceivedDate)
 }

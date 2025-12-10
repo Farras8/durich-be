@@ -12,17 +12,22 @@ import (
 	"github.com/uptrace/bun"
 )
 
+type ShipmentReceiveItem struct {
+	Berat float64
+	Qty   int
+}
+
 type ShipmentRepository interface {
 	Create(ctx context.Context, shipment *domain.Pengiriman) error
 	GetByID(ctx context.Context, id string) (*domain.Pengiriman, error)
-	GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]domain.Pengiriman, int64, error)
+	GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]domain.Pengiriman, int64, error)
 	AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error
 	RemoveItem(ctx context.Context, shipmentID, detailID string) error
 	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
 	Finalize(ctx context.Context, id string) error
 	GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error)
 	GetNextShipmentKode(ctx context.Context) (string, error)
-	Receive(ctx context.Context, id string, updates map[string]float64, tujuanID string) error
+	Receive(ctx context.Context, id string, updates map[string]ShipmentReceiveItem, tujuanID string, receivedDate time.Time) error
 }
 
 type shipmentRepository struct {
@@ -56,7 +61,7 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 	return shipment, nil
 }
 
-func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID string, page, limit int) ([]domain.Pengiriman, int64, error) {
+func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]domain.Pengiriman, int64, error) {
 	var shipments []domain.Pengiriman
 
 	query := r.db.InitQuery(ctx).NewSelect().
@@ -67,11 +72,19 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locati
 		Where("p.deleted_at IS NULL")
 
 	if locationID != "" {
-		// Filter shipments where destination is locationID OR creator is from locationID
-		query = query.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("p.tujuan_id = ?", locationID).
-				WhereOr("creator.current_location_id = ?", locationID)
-		})
+		if listType == "incoming" {
+			// Incoming: Destination is MY location
+			query = query.Where("p.tujuan_id = ?", locationID)
+		} else if listType == "outgoing" {
+			// Outgoing: Creator is from MY location
+			query = query.Where("creator.current_location_id = ?", locationID)
+		} else {
+			// Default: Show both (Incoming OR Outgoing)
+			query = query.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+				return q.Where("p.tujuan_id = ?", locationID).
+					WhereOr("creator.current_location_id = ?", locationID)
+			})
+		}
 	}
 
 	if tujuan != "" {
@@ -329,17 +342,18 @@ func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context) (string, e
 	return fmt.Sprintf("%s-%03d", prefix, seq), nil
 }
 
-func (r *shipmentRepository) Receive(ctx context.Context, id string, updates map[string]float64, tujuanID string) error {
+func (r *shipmentRepository) Receive(ctx context.Context, id string, updates map[string]ShipmentReceiveItem, tujuanID string, receivedDate time.Time) error {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Update Shipment Status
+	// Update Shipment Status and ReceivedAt
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
 		Set("status = ?", constants.ShipmentStatusReceived).
+		Set("received_at = ?", receivedDate).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {
@@ -347,12 +361,14 @@ func (r *shipmentRepository) Receive(ctx context.Context, id string, updates map
 	}
 
 	// Update Lots
-	for lotID, berat := range updates {
+	for lotID, item := range updates {
 		_, err := tx.NewUpdate().
 			Model((*domain.StokLot)(nil)).
 			Set("current_location_id = ?", tujuanID).
-			Set("berat_sisa = ?", berat).
+			Set("berat_sisa = ?", item.Berat).
+			Set("qty_sisa = ?", item.Qty).
 			Set("status = ?", constants.LotStatusReady).
+			Set("arrived_at = ?", receivedDate).
 			Where("id = ?", lotID).
 			Exec(ctx)
 		if err != nil {

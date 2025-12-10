@@ -192,9 +192,10 @@ func (a *authService) Login(
 			}
 
 			res = response.LoginResponse{
-				AccessToken:  pair.AccessToken,
-				RefreshToken: pair.RefreshToken,
-				Roles:        tokenPayload.Role,
+				AccessToken:       pair.AccessToken,
+				RefreshToken:      pair.RefreshToken,
+				Roles:             tokenPayload.Role,
+				CurrentLocationID: authData.User.CurrentLocationID,
 			}
 
 			return nil

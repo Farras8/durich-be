@@ -27,5 +27,6 @@ type ShipmentReceiveRequest struct {
 	Details      []struct {
 		LotID         string  `json:"lot_id" binding:"required"`
 		BeratDiterima float64 `json:"berat_diterima" binding:"required,min=0"`
+		QtyDiterima   *int    `json:"qty_diterima"`
 	} `json:"details" binding:"required,dive"`
 }

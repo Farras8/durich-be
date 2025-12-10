@@ -1,9 +1,12 @@
 package controllers
 
 import (
+	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
+	"durich-be/pkg/authentication"
 	"durich-be/pkg/http/response"
 	"net/http"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,7 +45,10 @@ func (c *DashboardController) GetSalesDashboard(ctx *gin.Context) {
 }
 
 func (c *DashboardController) GetWarehouseData(ctx *gin.Context) {
-	res, err := c.service.GetWarehouseData(ctx.Request.Context())
+	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
+	locationID := userAuth.LocationID
+
+	res, err := c.service.GetWarehouseData(ctx.Request.Context(), locationID)
 	if err != nil {
 		response.SendError(ctx, err)
 		return
