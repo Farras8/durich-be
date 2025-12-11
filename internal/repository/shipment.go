@@ -20,7 +20,7 @@ type ShipmentReceiveItem struct {
 type ShipmentRepository interface {
 	Create(ctx context.Context, shipment *domain.Pengiriman) error
 	GetByID(ctx context.Context, id string) (*domain.Pengiriman, error)
-	GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]domain.Pengiriman, int64, error)
+	GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error)
 	AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error
 	RemoveItem(ctx context.Context, shipmentID, detailID string) error
 	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
@@ -61,7 +61,7 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 	return shipment, nil
 }
 
-func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]domain.Pengiriman, int64, error) {
+func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error) {
 	var shipments []domain.Pengiriman
 
 	query := r.db.InitQuery(ctx).NewSelect().
@@ -70,6 +70,17 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locati
 		Relation("Creator").
 		Relation("TujuanDetail").
 		Where("p.deleted_at IS NULL")
+
+	if tujuanType != "" {
+		// Filter by Tujuan Type (internal/external) using alias from Relation("TujuanDetail")
+		// Default alias for relation is destination struct field name in snake_case?
+		// Struct: TujuanDetail *TujuanPengiriman `bun:"rel:belongs-to,join:tujuan_id=id"`
+		// Bun alias usually matches the model alias if specified or table name.
+		// Let's use 'tujuan_detail' as alias which is standard for relation field name.
+		// Wait, Bun uses table alias if joined manually, orrelation alias.
+		// Let's try "tujuan_detail.tipe" as it is the relation name.
+		query = query.Where("tujuan_detail.tipe = ?", tujuanType)
+	}
 
 	if locationID != "" {
 		if listType == "incoming" {

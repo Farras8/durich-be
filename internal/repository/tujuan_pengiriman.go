@@ -9,7 +9,7 @@ import (
 
 type TujuanPengirimanRepository interface {
 	Create(ctx context.Context, tujuan *domain.TujuanPengiriman) error
-	GetAll(ctx context.Context) ([]domain.TujuanPengiriman, error)
+	GetAll(ctx context.Context, tipe string) ([]domain.TujuanPengiriman, error)
 	GetByID(ctx context.Context, id string) (*domain.TujuanPengiriman, error)
 	Update(ctx context.Context, id string, tujuan *domain.TujuanPengiriman) error
 	Delete(ctx context.Context, id string) error
@@ -28,9 +28,15 @@ func (r *tujuanPengirimanRepository) Create(ctx context.Context, tujuan *domain.
 	return err
 }
 
-func (r *tujuanPengirimanRepository) GetAll(ctx context.Context) ([]domain.TujuanPengiriman, error) {
+func (r *tujuanPengirimanRepository) GetAll(ctx context.Context, tipe string) ([]domain.TujuanPengiriman, error) {
 	var tujuans []domain.TujuanPengiriman
-	err := r.db.InitQuery(ctx).NewSelect().Model(&tujuans).Where("deleted_at IS NULL").Scan(ctx)
+	query := r.db.InitQuery(ctx).NewSelect().Model(&tujuans).Where("deleted_at IS NULL")
+
+	if tipe != "" {
+		query = query.Where("tipe = ?", tipe)
+	}
+
+	err := query.Scan(ctx)
 	return tujuans, err
 }
 

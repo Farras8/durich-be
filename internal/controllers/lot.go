@@ -53,6 +53,8 @@ func (c *LotController) GetList(ctx *gin.Context) {
 	status := ctx.Query("status")
 	jenisDurianID := ctx.Query("jenis_durian_id")
 	kondisi := ctx.Query("kondisi")
+	scope := ctx.Query("scope")
+	createdAt := ctx.Query("created_at") // Format: YYYY-MM-DD
 
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
@@ -60,7 +62,7 @@ func (c *LotController) GetList(ctx *gin.Context) {
 	// DEBUG LOG
 	fmt.Printf("[DEBUG] LotController.GetList - UserID: %s, LocationID: '%s'\n", userAuth.UserID, locationID)
 
-	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi, locationID)
+	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi, locationID, scope, createdAt)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",

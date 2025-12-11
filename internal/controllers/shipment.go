@@ -47,6 +47,7 @@ func (c *ShipmentController) GetList(ctx *gin.Context) {
 	tujuan := ctx.Query("tujuan")
 	status := ctx.Query("status")
 	listType := ctx.Query("type") // "incoming" or "outgoing"
+	tujuanType := ctx.Query("tujuan_type") // "internal" or "external"
 
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
@@ -54,7 +55,7 @@ func (c *ShipmentController) GetList(ctx *gin.Context) {
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	res, total, err := c.service.GetList(ctx.Request.Context(), tujuan, status, locationID, listType, page, limit)
+	res, total, err := c.service.GetList(ctx.Request.Context(), tujuan, status, locationID, listType, tujuanType, page, limit)
 	if err != nil {
 		response.SendError(ctx, err)
 		return

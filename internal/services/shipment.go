@@ -13,7 +13,7 @@ import (
 
 type ShipmentService interface {
 	Create(ctx context.Context, req requests.ShipmentCreateRequest, userID string) (*response.ShipmentResponse, error)
-	GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]response.ShipmentResponse, int64, error)
+	GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]response.ShipmentResponse, int64, error)
 	GetByID(ctx context.Context, id string) (*response.ShipmentDetailResponse, error)
 	AddItem(ctx context.Context, shipmentID string, req requests.ShipmentAddItemRequest, locationID string) error
 	RemoveItem(ctx context.Context, shipmentID string, detailID string) error
@@ -74,7 +74,7 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	return &resp, nil
 }
 
-func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationID, listType string, page, limit int) ([]response.ShipmentResponse, int64, error) {
+func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]response.ShipmentResponse, int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -85,7 +85,7 @@ func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationI
 		limit = 20
 	}
 
-	shipments, total, err := s.repo.GetList(ctx, tujuan, status, locationID, listType, page, limit)
+	shipments, total, err := s.repo.GetList(ctx, tujuan, status, locationID, listType, tujuanType, page, limit)
 	if err != nil {
 		return nil, 0, err
 	}

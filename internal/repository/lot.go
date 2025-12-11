@@ -10,7 +10,7 @@ import (
 type LotRepository interface {
 	Create(ctx context.Context, lot *domain.StokLot) error
 	GetByID(ctx context.Context, id string) (*domain.StokLot, error)
-	GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]domain.StokLot, error)
+	GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error)
 	Update(ctx context.Context, lot *domain.StokLot) error
 	AddBuah(ctx context.Context, buah *domain.BuahRaw) error
 	RemoveItem(ctx context.Context, lotID, buahRawID string) error
@@ -52,7 +52,7 @@ func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot
 	return lot, nil
 }
 
-func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]domain.StokLot, error) {
+func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error) {
 	var lots []domain.StokLot
 	query := r.db.InitQuery(ctx).NewSelect().
 		Model(&lots).
@@ -65,7 +65,11 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 
 	if locationID != "" {
 		query = query.Where("stok_lot.current_location_id = ?", locationID)
+	} else if scope == "local" {
+		// Central Admin requesting their own stock (IS NULL)
+		query = query.Where("stok_lot.current_location_id IS NULL")
 	}
+
 	if status != "" {
 		query = query.Where("stok_lot.status = ?", status)
 	}
@@ -74,6 +78,9 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 	}
 	if kondisi != "" {
 		query = query.Where("stok_lot.kondisi_buah = ?", kondisi)
+	}
+	if createdAt != "" {
+		query = query.Where("DATE(stok_lot.created_at) = ?", createdAt)
 	}
 
 	query = query.Order("stok_lot.created_at DESC")
@@ -179,9 +186,7 @@ func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKo
 
 	nextSeq := 1
 	if err == nil && lot.Kode != "" {
-		// Extract number from LOT-KODE-GRADE-DDMMYY-SEQ
 		var seq int
-		// prefix is "LOT-KODE-GRADE-DDMMYY", so full format is "prefix-%d"
 		_, err = fmt.Sscanf(lot.Kode, prefix+"-%d", &seq)
 		if err == nil {
 			nextSeq = seq + 1
@@ -192,7 +197,6 @@ func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKo
 	return newKode, tx.Commit()
 }
 
-// Keep for backward compatibility or removal if unused
 func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
 	tx, err := r.db.InitQuery(ctx).Begin()
 	if err != nil {
@@ -222,14 +226,12 @@ func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
 
 	newKode := fmt.Sprintf("LOT-%03d", nextSeq)
 
-	// Check if kode already exists (though unique, but to be safe)
 	var existing domain.StokLot
 	err = tx.NewSelect().
 		Model(&existing).
 		Where("kode = ?", newKode).
 		Scan(ctx)
 	if err == nil {
-		// Kode exists, increment again
 		nextSeq++
 		newKode = fmt.Sprintf("LOT-%03d", nextSeq)
 	}

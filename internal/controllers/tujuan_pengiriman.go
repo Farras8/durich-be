@@ -40,7 +40,8 @@ func (c *TujuanPengirimanController) Create(ctx *gin.Context) {
 }
 
 func (c *TujuanPengirimanController) GetAll(ctx *gin.Context) {
-	result, err := c.service.GetAll(ctx.Request.Context())
+	tipe := ctx.Query("tipe")
+	result, err := c.service.GetAll(ctx.Request.Context(), tipe)
 	if err != nil {
 		response.SendError(ctx, err)
 		return

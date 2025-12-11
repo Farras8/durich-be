@@ -7,6 +7,7 @@ import (
 
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
+	"durich-be/pkg/authentication"
 	"durich-be/pkg/errors"
 	"durich-be/pkg/http/response"
 	"durich-be/pkg/utils"
@@ -138,6 +139,15 @@ func (c *BuahRawController) ClearCache(ctx *gin.Context) {
 
 func (c *BuahRawController) buildFilter(ctx *gin.Context) map[string]interface{} {
 	filter := make(map[string]interface{})
+
+	// Filter by Location based on User
+	userAuth, exists := ctx.Get(authentication.Token)
+	if exists {
+		auth := userAuth.(requests.UserAuth)
+		if auth.LocationID != "" {
+			filter["location_id"] = auth.LocationID
+		}
+	}
 
 	if v := ctx.Query("tgl_panen"); v != "" {
 		filter["tgl_panen"] = v

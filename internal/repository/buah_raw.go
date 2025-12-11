@@ -88,6 +88,13 @@ func (r *buahRawRepository) GetUnsorted(ctx context.Context, filter map[string]i
 
 func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string]interface{}) *bun.SelectQuery {
 	includeRelations, ok := filter["include_relations"].(map[string]bool)
+	
+	// Check if location filter is present, we MUST join Lot
+	hasLocationFilter := false
+	if val, ok := filter["location_id"].(string); ok && val != "" {
+		hasLocationFilter = true
+	}
+
 	if !ok || len(includeRelations) == 0 {
 		return q.
 			Relation("JenisDurianDetail").
@@ -95,7 +102,8 @@ func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string
 			Relation("PohonPanenDetail.Blok").
 			Relation("PohonPanenDetail.Blok.Divisi").
 			Relation("PohonPanenDetail.Blok.Divisi.Estate").
-			Relation("PohonPanenDetail.Blok.Divisi.Estate.Company")
+			Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
+			Relation("Lot")
 	}
 
 	if includeRelations["jenis"] {
@@ -110,6 +118,11 @@ func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string
 	}
 	if includeRelations["pohon"] {
 		q = q.Relation("PohonPanenDetail")
+	}
+	
+	// Force join Lot if filtered by location, or requested
+	if hasLocationFilter || includeRelations["lot"] { // Assuming 'lot' might be requested explicitly too
+		q = q.Relation("Lot")
 	}
 
 	return q
@@ -126,7 +139,6 @@ func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]i
 		q = q.Where("buah_raw.kode_buah LIKE ?", "%"+val+"%")
 	}
 	if val, ok := filter["is_sorted"]; ok {
-		// Deprecated field, using lot_id check instead
 		if isSorted, valid := val.(bool); valid {
 			if isSorted {
 				q = q.Where("buah_raw.lot_id IS NOT NULL")
@@ -137,6 +149,12 @@ func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]i
 	}
 	if val, ok := filter["blok_panen_id"].(string); ok && val != "" {
 		q = q.Where("pohon.blok_id = ?", val)
+	}
+	if val, ok := filter["location_id"].(string); ok && val != "" {
+		// Filter based on Lot Location (implies fruit must be in a lot)
+		// Since we join "Lot", we can filter by lot.current_location_id
+		// Bun alias for Relation("Lot") is usually "lot"
+		q = q.Where("lot.current_location_id = ?", val)
 	}
 
 	return q
@@ -212,7 +230,6 @@ func (r *buahRawRepository) GetNextSequenceWithLock(ctx context.Context, prefix 
 	sequence := 1
 	if err == nil && buah.KodeBuah != "" {
 		var lastSeq int
-		// Format is PREFIX-Fxxxxx
 		_, err = fmt.Sscanf(buah.KodeBuah, prefix+"-F%d", &lastSeq)
 		if err == nil {
 			sequence = lastSeq + 1

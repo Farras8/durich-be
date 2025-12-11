@@ -594,6 +594,9 @@ func (r *dashboardRepository) GetWarehouseData(ctx context.Context, locationID s
 
 		if locationID != "" {
 			query = query.Where("current_location_id = ?", locationID)
+		} else {
+			// If Central Admin (locationID == ""), show ONLY Central Warehouse stock
+			query = query.Where("current_location_id IS NULL")
 		}
 
 		count, err := query.Count(ctx)
@@ -607,20 +610,12 @@ func (r *dashboardRepository) GetWarehouseData(ctx context.Context, locationID s
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Count all lots that are currently in status 'SHIPPED' (OTW / In Transit)
-		// This represents the total stock currently moving between warehouses or to customers.
 		query := r.db.NewSelect().
 			Table("tb_stok_lot").
 			Where("status = ?", "SHIPPED"). // Assuming SHIPPED is the constant for items in transit
 			Where("deleted_at IS NULL")
 
 		if locationID != "" {
-			// For sent items:
-			// If I am a Branch (locationID != ""), 'Sent' means items I sent OUT.
-			// So, previous_location_id was me? Or we track via Shipment creator location?
-			// Since lot updates location to 'destination' upon receive, SHIPPED lots usually still have
-			// 'current_location_id' as the Origin (until received).
-			// Let's assume 'current_location_id' holds the Origin while in transit.
 			query = query.Where("current_location_id = ?", locationID)
 		}
 

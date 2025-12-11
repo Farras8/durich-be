@@ -13,7 +13,7 @@ import (
 
 type TujuanPengirimanService interface {
 	Create(ctx context.Context, req requests.CreateTujuanPengirimanRequest, locationID string) (*response.TujuanPengirimanResponse, error)
-	GetAll(ctx context.Context) ([]*response.TujuanPengirimanResponse, error)
+	GetAll(ctx context.Context, tipe string) ([]*response.TujuanPengirimanResponse, error)
 	GetByID(ctx context.Context, id string) (*response.TujuanPengirimanResponse, error)
 	Update(ctx context.Context, id string, req requests.UpdateTujuanPengirimanRequest, locationID string) (*response.TujuanPengirimanResponse, error)
 	Delete(ctx context.Context, id string, locationID string) error
@@ -52,8 +52,8 @@ func (s *tujuanPengirimanService) Create(ctx context.Context, req requests.Creat
 	return response.NewTujuanPengirimanResponse(tujuan), nil
 }
 
-func (s *tujuanPengirimanService) GetAll(ctx context.Context) ([]*response.TujuanPengirimanResponse, error) {
-	tujuans, err := s.repo.GetAll(ctx)
+func (s *tujuanPengirimanService) GetAll(ctx context.Context, tipe string) ([]*response.TujuanPengirimanResponse, error) {
+	tujuans, err := s.repo.GetAll(ctx, tipe)
 	if err != nil {
 		return nil, err
 	}

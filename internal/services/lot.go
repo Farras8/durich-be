@@ -15,7 +15,7 @@ import (
 
 type LotService interface {
 	Create(ctx context.Context, req requests.LotCreateRequest, locationID string) (*response.LotResponse, error)
-	GetList(ctx context.Context, status, jenisDurian, kondisi, locationID string) ([]response.LotResponse, error)
+	GetList(ctx context.Context, status, jenisDurian, kondisi, locationID, scope, createdAt string) ([]response.LotResponse, error)
 	GetDetail(ctx context.Context, id string) (*response.LotDetailResponse, error)
 	AddItems(ctx context.Context, lotID string, req requests.LotAddItemsRequest, locationID string) (*response.LotAddItemsResponse, error)
 	RemoveItem(ctx context.Context, lotID string, req requests.LotRemoveItemRequest, locationID string) error
@@ -83,8 +83,8 @@ func (s *lotService) Create(ctx context.Context, req requests.LotCreateRequest, 
 	}, nil
 }
 
-func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID string) ([]response.LotResponse, error) {
-	lots, err := s.lotRepo.GetList(ctx, status, jenisDurianID, kondisi, locationID)
+func (s *lotService) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]response.LotResponse, error) {
+	lots, err := s.lotRepo.GetList(ctx, status, jenisDurianID, kondisi, locationID, scope, createdAt)
 	if err != nil {
 		return nil, err
 	}
