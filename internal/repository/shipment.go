@@ -4,7 +4,6 @@ import (
 	"context"
 	"durich-be/internal/constants"
 	"durich-be/internal/domain"
-	"durich-be/pkg/database"
 	"errors"
 	"fmt"
 	"time"
@@ -18,34 +17,35 @@ type ShipmentReceiveItem struct {
 }
 
 type ShipmentRepository interface {
-	Create(ctx context.Context, shipment *domain.Pengiriman) error
-	GetByID(ctx context.Context, id string) (*domain.Pengiriman, error)
-	GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error)
-	AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error
-	RemoveItem(ctx context.Context, shipmentID, detailID string) error
-	UpdateStatus(ctx context.Context, id, status, notes, userID string) error
-	Finalize(ctx context.Context, id string) error
-	GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error)
-	GetNextShipmentKode(ctx context.Context) (string, error)
-	Receive(ctx context.Context, id string, updates map[string]ShipmentReceiveItem, tujuanID string, receivedDate time.Time) error
+	Create(ctx context.Context, db bun.IDB, shipment *domain.Pengiriman) error
+	GetByID(ctx context.Context, db bun.IDB, id string) (*domain.Pengiriman, error)
+	GetList(ctx context.Context, db bun.IDB, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error)
+	AddItem(ctx context.Context, db bun.IDB, detail *domain.PengirimanDetail, locationID string) error
+	RemoveItem(ctx context.Context, db bun.IDB, shipmentID, detailID string) error
+	UpdateStatus(ctx context.Context, db bun.IDB, id, status, notes, userID string) error
+	UpdateShipmentToSending(ctx context.Context, db bun.IDB, id string) error
+	UpdateLotsToShipped(ctx context.Context, db bun.IDB, lotIDs []string) error
+	GetDetailByID(ctx context.Context, db bun.IDB, id string) (*domain.PengirimanDetail, error)
+	GetNextShipmentKode(ctx context.Context, db bun.IDB) (string, error)
+	UpdateShipmentToReceived(ctx context.Context, db bun.IDB, id string, receivedDate time.Time) error
+	UpdateLotsAfterReceive(ctx context.Context, db bun.IDB, lotID, tujuanID string, berat float64, qty int, receivedDate time.Time) error
+	GetDetailsByShipmentID(ctx context.Context, db bun.IDB, shipmentID string) ([]domain.PengirimanDetail, error)
 }
 
-type shipmentRepository struct {
-	db *database.Database
+type shipmentRepository struct{}
+
+func NewShipmentRepository() ShipmentRepository {
+	return &shipmentRepository{}
 }
 
-func NewShipmentRepository(db *database.Database) ShipmentRepository {
-	return &shipmentRepository{db: db}
-}
-
-func (r *shipmentRepository) Create(ctx context.Context, shipment *domain.Pengiriman) error {
-	_, err := r.db.InitQuery(ctx).NewInsert().Model(shipment).Exec(ctx)
+func (r *shipmentRepository) Create(ctx context.Context, db bun.IDB, shipment *domain.Pengiriman) error {
+	_, err := db.NewInsert().Model(shipment).Exec(ctx)
 	return err
 }
 
-func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pengiriman, error) {
+func (r *shipmentRepository) GetByID(ctx context.Context, db bun.IDB, id string) (*domain.Pengiriman, error) {
 	shipment := new(domain.Pengiriman)
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model(shipment).
 		Relation("Details").
 		Relation("Details.Lot").
@@ -61,10 +61,10 @@ func (r *shipmentRepository) GetByID(ctx context.Context, id string) (*domain.Pe
 	return shipment, nil
 }
 
-func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error) {
+func (r *shipmentRepository) GetList(ctx context.Context, db bun.IDB, tujuan, status, locationID, listType, tujuanType string, page, limit int) ([]domain.Pengiriman, int64, error) {
 	var shipments []domain.Pengiriman
 
-	query := r.db.InitQuery(ctx).NewSelect().
+	query := db.NewSelect().
 		Model(&shipments).
 		Relation("Details").
 		Relation("Creator").
@@ -72,25 +72,15 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locati
 		Where("p.deleted_at IS NULL")
 
 	if tujuanType != "" {
-		// Filter by Tujuan Type (internal/external) using alias from Relation("TujuanDetail")
-		// Default alias for relation is destination struct field name in snake_case?
-		// Struct: TujuanDetail *TujuanPengiriman `bun:"rel:belongs-to,join:tujuan_id=id"`
-		// Bun alias usually matches the model alias if specified or table name.
-		// Let's use 'tujuan_detail' as alias which is standard for relation field name.
-		// Wait, Bun uses table alias if joined manually, orrelation alias.
-		// Let's try "tujuan_detail.tipe" as it is the relation name.
 		query = query.Where("tujuan_detail.tipe = ?", tujuanType)
 	}
 
 	if locationID != "" {
 		if listType == "incoming" {
-			// Incoming: Destination is MY location
 			query = query.Where("p.tujuan_id = ?", locationID)
 		} else if listType == "outgoing" {
-			// Outgoing: Creator is from MY location
 			query = query.Where("creator.current_location_id = ?", locationID)
 		} else {
-			// Default: Show both (Incoming OR Outgoing)
 			query = query.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
 				return q.Where("p.tujuan_id = ?", locationID).
 					WhereOr("creator.current_location_id = ?", locationID)
@@ -121,25 +111,20 @@ func (r *shipmentRepository) GetList(ctx context.Context, tujuan, status, locati
 	return shipments, int64(total), nil
 }
 
-func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.PengirimanDetail, locationID string) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Check Shipment Status
+// AddItem - Pure data access, terima bun.IDB
+func (r *shipmentRepository) AddItem(ctx context.Context, db bun.IDB, detail *domain.PengirimanDetail, locationID string) error {
 	var shipmentStatus string
 	var shipmentCreatorLocation *string
-	err = tx.NewSelect().
+	err := db.NewSelect().
 		Model((*domain.Pengiriman)(nil)).
 		Column("status").
 		ColumnExpr("creator.current_location_id").
 		Join("JOIN users AS creator ON creator.id = p.created_by").
 		Where("p.id = ?", detail.PengirimanID).
 		Where("p.deleted_at IS NULL").
+		For("UPDATE OF p").
 		Scan(ctx, &shipmentStatus, &shipmentCreatorLocation)
-	
+
 	if err != nil {
 		return errors.New("shipment not found")
 	}
@@ -147,20 +132,13 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 		return errors.New("shipment must be DRAFT to add items")
 	}
 
-	// Validate Access: User can only modify shipments they have access to
-	// (Though Controller/Service usually handles this, double check here is safe)
-	
-	// Fetch Lot & Validate Location
 	lot := new(domain.StokLot)
-	query := tx.NewSelect().
+	query := db.NewSelect().
 		Model(lot).
 		Where("id = ?", detail.LotSumberID).
 		Where("status = ?", constants.LotStatusReady).
 		For("UPDATE")
 
-	// Strict Location Check:
-	// If User is Central (locationID == ""), they can only pick Central Lots (current_location_id IS NULL)
-	// If User is Branch (locationID != ""), they can only pick Branch Lots (current_location_id == locationID)
 	if locationID == "" {
 		query = query.Where("current_location_id IS NULL")
 	} else {
@@ -172,20 +150,23 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 		return errors.New("lot not found, not in READY status, or belongs to another location")
 	}
 
+	if lot.QtySisa <= 0 || lot.BeratSisa <= 0 {
+		return errors.New("lot has insufficient stock")
+	}
+
 	detail.QtyAmbil = lot.QtySisa
 	detail.BeratAmbil = lot.BeratSisa
 
-	_, err = tx.NewInsert().Model(detail).Exec(ctx)
+	_, err = db.NewInsert().Model(detail).Exec(ctx)
 	if err != nil {
 		return err
 	}
 
 	lot.Status = constants.LotStatusBooked
-	// Set sisa to 0 to prevent usage
 	lot.QtySisa = 0
 	lot.BeratSisa = 0
 
-	_, err = tx.NewUpdate().
+	_, err = db.NewUpdate().
 		Model(lot).
 		Column("status", "qty_sisa", "berat_sisa").
 		WherePK().
@@ -194,22 +175,17 @@ func (r *shipmentRepository) AddItem(ctx context.Context, detail *domain.Pengiri
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailID string) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+func (r *shipmentRepository) RemoveItem(ctx context.Context, db bun.IDB, shipmentID, detailID string) error {
 	var shipmentStatus string
-	err = tx.NewSelect().
+	err := db.NewSelect().
 		Model((*domain.Pengiriman)(nil)).
 		Column("status").
 		Where("id = ?", shipmentID).
 		Where("deleted_at IS NULL").
+		For("UPDATE").
 		Scan(ctx, &shipmentStatus)
 	if err != nil {
 		return errors.New("shipment not found")
@@ -217,11 +193,10 @@ func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailI
 	if shipmentStatus != constants.ShipmentStatusDraft {
 		return errors.New("shipment must be DRAFT to remove items")
 	}
-
 	detail := new(domain.PengirimanDetail)
-	err = tx.NewSelect().Model(detail).Where("id = ?", detailID).Scan(ctx)
+	err = db.NewSelect().Model(detail).Where("id = ?", detailID).Scan(ctx)
 	if err != nil {
-		return err
+		return errors.New("shipment detail not found")
 	}
 
 	if detail.PengirimanID != shipmentID {
@@ -229,17 +204,19 @@ func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailI
 	}
 
 	lot := new(domain.StokLot)
-	err = tx.NewSelect().Model(lot).Where("id = ?", detail.LotSumberID).For("UPDATE").Scan(ctx)
+	err = db.NewSelect().Model(lot).Where("id = ?", detail.LotSumberID).For("UPDATE").Scan(ctx)
 	if err != nil {
-		return err
+		return errors.New("lot not found")
 	}
 
-	// Restore original quantity and weight
+	if lot.Status != constants.LotStatusBooked {
+		return errors.New("lot is not in BOOKED status, cannot restore")
+	}
 	lot.QtySisa = detail.QtyAmbil
 	lot.BeratSisa = detail.BeratAmbil
 	lot.Status = constants.LotStatusReady
 
-	_, err = tx.NewUpdate().
+	_, err = db.NewUpdate().
 		Model(lot).
 		Column("qty_sisa", "berat_sisa", "status").
 		WherePK().
@@ -248,76 +225,88 @@ func (r *shipmentRepository) RemoveItem(ctx context.Context, shipmentID, detailI
 		return err
 	}
 
-	_, err = tx.NewDelete().Model(detail).WherePK().Exec(ctx)
+	_, err = db.NewDelete().Model(detail).WherePK().Exec(ctx)
 	if err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (r *shipmentRepository) UpdateStatus(ctx context.Context, id, status, notes, userID string) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().
+// UpdateStatus - Simple update, transaction di-handle di service
+func (r *shipmentRepository) UpdateStatus(ctx context.Context, db bun.IDB, id, status, notes, userID string) error {
+	var currentStatus string
+	err := db.NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("status").
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx, &currentStatus)
+	if err != nil {
+		return errors.New("shipment not found")
+	}
+
+	// Update status
+	_, err = db.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
 		Set("status = ?", status).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateShipmentToSending - Dipisah untuk composability
+func (r *shipmentRepository) UpdateShipmentToSending(ctx context.Context, db bun.IDB, id string) error {
+	var currentStatus string
+	err := db.NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("status").
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx, &currentStatus)
+	if err != nil {
+		return errors.New("shipment not found")
+	}
+	if currentStatus != constants.ShipmentStatusDraft {
+		return errors.New("shipment must be DRAFT to finalize")
+	}
+
+	_, err = db.NewUpdate().
+		Model((*domain.Pengiriman)(nil)).
+		Set("status = ?", constants.ShipmentStatusSending).
+		Set("updated_at = ?", time.Now()).
 		Where("id = ?", id).
 		Exec(ctx)
 	return err
 }
 
-func (r *shipmentRepository) Finalize(ctx context.Context, id string) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return err
+// UpdateLotsToShipped - Dipisah untuk composability
+func (r *shipmentRepository) UpdateLotsToShipped(ctx context.Context, db bun.IDB, lotIDs []string) error {
+	if len(lotIDs) == 0 {
+		return nil
 	}
-	defer tx.Rollback()
 
-	_, err = tx.NewUpdate().
-		Model((*domain.Pengiriman)(nil)).
-		Set("status = ?", constants.ShipmentStatusSending).
-		Where("id = ?", id).
+	_, err := db.NewUpdate().
+		Model((*domain.StokLot)(nil)).
+		Set("status = ?", constants.LotStatusShipped).
+		Set("updated_at = ?", time.Now()).
+		Where("id IN (?)", bun.In(lotIDs)).
+		Where("qty_sisa = 0").
+		Where("berat_sisa = 0").
 		Exec(ctx)
-	if err != nil {
-		return err
-	}
-
-	var details []domain.PengirimanDetail
-	err = tx.NewSelect().Model(&details).Where("pengiriman_id = ?", id).Scan(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Check for empty lots
-	var emptyLotIDs []string
-	for _, d := range details {
-		lot := new(domain.StokLot)
-		err = tx.NewSelect().Model(lot).Where("id = ?", d.LotSumberID).Scan(ctx)
-		if err != nil {
-			return err
-		}
-
-		if lot.QtySisa <= 0 {
-			emptyLotIDs = append(emptyLotIDs, d.LotSumberID)
-		}
-	}
-
-	if len(emptyLotIDs) > 0 {
-		_, err = tx.NewUpdate().
-			Model((*domain.StokLot)(nil)).
-			Set("status = ?", constants.LotStatusShipped).
-			Where("id IN (?)", bun.In(emptyLotIDs)).
-			Exec(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	return err
 }
 
-func (r *shipmentRepository) GetDetailByID(ctx context.Context, id string) (*domain.PengirimanDetail, error) {
+func (r *shipmentRepository) GetDetailByID(ctx context.Context, db bun.IDB, id string) (*domain.PengirimanDetail, error) {
 	detail := new(domain.PengirimanDetail)
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model(detail).
 		Relation("Lot").
 		Where("pd.id = ?", id).
@@ -328,17 +317,19 @@ func (r *shipmentRepository) GetDetailByID(ctx context.Context, id string) (*dom
 	return detail, nil
 }
 
-func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context) (string, error) {
+// GetNextShipmentKode - Menggunakan FOR UPDATE untuk prevent race condition
+func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context, db bun.IDB) (string, error) {
 	dateStr := time.Now().Format("060102") // YYMMDD
 	prefix := fmt.Sprintf("SHP-%s", dateStr)
 
 	var lastCode string
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model((*domain.Pengiriman)(nil)).
 		Column("kode").
 		Where("kode LIKE ?", prefix+"-%").
 		Order("kode DESC").
 		Limit(1).
+		For("UPDATE SKIP LOCKED").
 		Scan(ctx, &lastCode)
 
 	seq := 1
@@ -353,39 +344,70 @@ func (r *shipmentRepository) GetNextShipmentKode(ctx context.Context) (string, e
 	return fmt.Sprintf("%s-%03d", prefix, seq), nil
 }
 
-func (r *shipmentRepository) Receive(ctx context.Context, id string, updates map[string]ShipmentReceiveItem, tujuanID string, receivedDate time.Time) error {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// GetDetailsByShipmentID - Helper untuk get details dengan lock
+func (r *shipmentRepository) GetDetailsByShipmentID(ctx context.Context, db bun.IDB, shipmentID string) ([]domain.PengirimanDetail, error) {
+	var details []domain.PengirimanDetail
+	err := db.NewSelect().
+		Model(&details).
+		Where("pengiriman_id = ?", shipmentID).
+		For("UPDATE").
+		Scan(ctx)
+	return details, err
+}
 
-	// Update Shipment Status and ReceivedAt
-	_, err = tx.NewUpdate().
+// UpdateShipmentToReceived - Dipisah untuk composability
+func (r *shipmentRepository) UpdateShipmentToReceived(ctx context.Context, db bun.IDB, id string, receivedDate time.Time) error {
+	var currentStatus string
+	err := db.NewSelect().
+		Model((*domain.Pengiriman)(nil)).
+		Column("status").
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx, &currentStatus)
+	if err != nil {
+		return errors.New("shipment not found")
+	}
+
+	if currentStatus != constants.ShipmentStatusSending {
+		return fmt.Errorf("invalid shipment status: %s, expected: %s", currentStatus, constants.ShipmentStatusSending)
+	}
+
+	_, err = db.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
 		Set("status = ?", constants.ShipmentStatusReceived).
 		Set("received_at = ?", receivedDate).
+		Set("updated_at = ?", time.Now()).
 		Where("id = ?", id).
 		Exec(ctx)
+	return err
+}
+
+// UpdateLotsAfterReceive - Update individual lot
+func (r *shipmentRepository) UpdateLotsAfterReceive(ctx context.Context, db bun.IDB, lotID, tujuanID string, berat float64, qty int, receivedDate time.Time) error {
+	var existingLot domain.StokLot
+	err := db.NewSelect().
+		Model(&existingLot).
+		Where("id = ?", lotID).
+		For("UPDATE").
+		Scan(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("lot %s not found", lotID)
 	}
 
-	// Update Lots
-	for lotID, item := range updates {
-		_, err := tx.NewUpdate().
-			Model((*domain.StokLot)(nil)).
-			Set("current_location_id = ?", tujuanID).
-			Set("berat_sisa = ?", item.Berat).
-			Set("qty_sisa = ?", item.Qty).
-			Set("status = ?", constants.LotStatusReady).
-			Set("arrived_at = ?", receivedDate).
-			Where("id = ?", lotID).
-			Exec(ctx)
-		if err != nil {
-			return err
-		}
+	if berat < 0 || qty < 0 {
+		return fmt.Errorf("received quantity/weight cannot be negative for lot %s", lotID)
 	}
 
-	return tx.Commit()
+	_, err = db.NewUpdate().
+		Model((*domain.StokLot)(nil)).
+		Set("current_location_id = ?", tujuanID).
+		Set("berat_sisa = ?", berat).
+		Set("qty_sisa = ?", qty).
+		Set("status = ?", constants.LotStatusReady).
+		Set("arrived_at = ?", receivedDate).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", lotID).
+		Exec(ctx)
+	return err
 }

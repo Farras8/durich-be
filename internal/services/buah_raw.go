@@ -27,7 +27,6 @@ type BuahRawService interface {
 type buahRawService struct {
 	repo       repository.BuahRawRepository
 	jenisCache sync.Map
-	mu         sync.Mutex
 }
 
 func NewBuahRawService(repo repository.BuahRawRepository) BuahRawService {
@@ -42,26 +41,22 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	// Default pohon ID logic
 	pohonPanenID := req.PohonPanenID
 	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
 	if pohonPanenID == nil || *pohonPanenID == "" {
 		pohonPanenID = &defaultPohonID
 	}
 
-	// Get pohon with full hierarchy (Company -> Estate -> Divisi -> Blok -> Pohon)
 	pohon, err := s.repo.GetPohonWithFullHierarchy(ctx, *pohonPanenID)
 	if err != nil {
 		return response.BuahRawResponse{}, fmt.Errorf("pohon tidak ditemukan: %v", err)
 	}
 
-	// Build prefix from location hierarchy
 	prefix := s.buildLocationPrefix(pohon)
 	if prefix == "" {
 		return response.BuahRawResponse{}, fmt.Errorf("gagal membuat prefix lokasi: data hierarki tidak lengkap")
 	}
 
-	// Get next sequence for this location prefix
 	sequence, err := s.repo.GetNextSequenceWithLock(ctx, prefix, tglPanen)
 	if err != nil {
 		return response.BuahRawResponse{}, fmt.Errorf("gagal generate sequence: %v", err)
@@ -91,7 +86,6 @@ func (s *buahRawService) Create(ctx context.Context, req requests.BuahRawCreateR
 		return response.BuahRawResponse{}, err
 	}
 
-	// Manually attach relations to return full response without re-querying
 	buah.JenisDurianDetail = &jenisDurian
 	buah.PohonPanenDetail = pohon
 
@@ -104,30 +98,23 @@ func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBul
 		tglPanen = time.Now().Format("2006-01-02")
 	}
 
-	// Extract unique pohon IDs and fetch their hierarchies
 	pohonIDs := s.extractUniquePohonIDs(req.Items)
 	pohonMap, err := s.getPohonBatchWithHierarchy(ctx, pohonIDs)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil data pohon: %v", err)
 	}
 
-	// Build prefix map from pohon
 	prefixMap := s.buildPrefixMap(pohonMap)
 
-	// Get sequences for all prefixes
 	sequenceMap := make(map[string]int)
-	s.mu.Lock()
 	for prefix := range s.collectUniquePrefixes(prefixMap) {
 		sequence, err := s.repo.GetNextSequenceWithLock(ctx, prefix, tglPanen)
 		if err != nil {
-			s.mu.Unlock()
 			return nil, fmt.Errorf("gagal generate sequence untuk %s: %v", prefix, err)
 		}
 		sequenceMap[prefix] = sequence
 	}
-	s.mu.Unlock()
 
-	// Get jenis durian details for response mapping
 	jenisIDs := make([]string, 0)
 	for _, item := range req.Items {
 		jenisIDs = append(jenisIDs, item.JenisDurianID)
@@ -146,24 +133,17 @@ func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBul
 		}
 	}
 
-	// Map inserted items to full response
 	result := make([]response.BuahRawResponse, 0, len(buahToInsert))
 	for i, b := range buahToInsert {
-		// Attach loaded relations
 		if b.PohonPanen != nil {
 			b.PohonPanenDetail = pohonMap[*b.PohonPanen]
 		}
 		if jenis, ok := jenisMap[b.JenisDurian]; ok {
-			// create copy to assign address
 			j := jenis
 			b.JenisDurianDetail = &j
 		}
-		// Re-assign ID since it was generated in buildBuahRawListFromLocation but not in original struct passed to repo if repo modifies it (ksuid is string so ok)
-		// Wait, buahToInsert has IDs already generated.
-		
-		// Ensure we use the ID from the inserted list if needed, but buildBuahRawListFromLocation sets it.
-		b.ID = insertedIDs[i] 
-		
+		b.ID = insertedIDs[i]
+
 		result = append(result, s.mapToResponse(b))
 	}
 
@@ -173,7 +153,7 @@ func (s *buahRawService) BulkCreate(ctx context.Context, req requests.BuahRawBul
 func (s *buahRawService) extractUniquePohonIDs(items []requests.BuahRawBulkCreateItem) []string {
 	uniqueMap := make(map[string]bool)
 	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
-	
+
 	for _, item := range items {
 		pohonID := defaultPohonID
 		if item.PohonPanenID != nil && *item.PohonPanenID != "" {
@@ -222,7 +202,6 @@ func (s *buahRawService) collectUniquePrefixes(prefixMap map[string]string) map[
 	return prefixes
 }
 
-// Keep for backward compatibility (still used in Update method)
 func (s *buahRawService) getJenisDurianBatch(ctx context.Context, ids []string) (map[string]domain.JenisDurian, error) {
 	uncachedIDs := make([]string, 0)
 	result := make(map[string]domain.JenisDurian)
@@ -266,7 +245,6 @@ func (s *buahRawService) buildBuahRawListFromLocation(
 	defaultPohonID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
 
 	for _, item := range req.Items {
-		// Determine pohon ID for this item
 		pohonID := defaultPohonID
 		if item.PohonPanenID != nil && *item.PohonPanenID != "" {
 			pohonID = *item.PohonPanenID
@@ -274,7 +252,7 @@ func (s *buahRawService) buildBuahRawListFromLocation(
 
 		prefix := prefixMap[pohonID]
 		if prefix == "" {
-			continue // Skip items with invalid prefix
+			continue
 		}
 
 		currentSeq := sequenceMap[prefix]
@@ -388,10 +366,6 @@ func (s *buahRawService) Update(ctx context.Context, id string, req requests.Bua
 		item.TglPanen = req.TglPanen
 	}
 	if req.PohonPanenID != nil {
-		// If empty string provided, use default. If valid string, use it.
-		// If user sends explicit empty string, they might mean "reset to default" or "no tree".
-		// Requirement says: "kalau pohon idnya ga diisi default id pohonnya itu 6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
-		// So if user updates and sends "", set to default.
 		val := *req.PohonPanenID
 		if val == "" {
 			defaultID := "6SRlQ8zX9vJ2mN5P6Q7R8S9T001"
@@ -502,8 +476,6 @@ func (s *buahRawService) buildLotKode(lot *domain.StokLot) *string {
 	return nil
 }
 
-// buildLocationPrefix creates prefix from full hierarchy: Company+Estate+Divisi+Blok+Pohon
-// Example: IPSRES0101A010000 (IPS + RES + 01 + 01A01 + 0000)
 func (s *buahRawService) buildLocationPrefix(pohon *domain.Pohon) string {
 	if pohon == nil || pohon.Blok == nil {
 		return ""

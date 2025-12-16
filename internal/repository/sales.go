@@ -13,11 +13,14 @@ type SalesRepository interface {
 	Create(ctx context.Context, sales *domain.Penjualan) error
 	GetList(ctx context.Context, startDate, endDate, tipeJual, locationID string) ([]domain.Penjualan, error)
 	GetByID(ctx context.Context, id string) (*domain.Penjualan, error)
+	GetByIDWithLock(ctx context.Context, tx bun.Tx, id string) (*domain.Penjualan, error)
 	Update(ctx context.Context, sales *domain.Penjualan) error
 	Delete(ctx context.Context, id string) error
 	GetPengirimanByID(ctx context.Context, id string) (*domain.Pengiriman, error)
+	GetPengirimanByIDWithLock(ctx context.Context, tx bun.Tx, id string) (*domain.Pengiriman, error)
 	UpdatePengirimanStatus(ctx context.Context, id, status string) error
 	CheckSalesExistByShipmentID(ctx context.Context, shipmentID string) (bool, error)
+	CheckSalesExistByShipmentIDWithLock(ctx context.Context, tx bun.Tx, shipmentID string) (bool, error)
 }
 
 type salesRepository struct {
@@ -35,13 +38,11 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 	}
 	defer tx.Rollback()
 
-	// 1. Create Sales Record
 	_, err = tx.NewInsert().Model(sales).Exec(ctx)
 	if err != nil {
 		return err
 	}
 
-	// 2. Update Shipment Status -> COMPLETED
 	_, err = tx.NewUpdate().
 		Model((*domain.Pengiriman)(nil)).
 		Set("status = ?", constants.ShipmentStatusCompleted).
@@ -51,7 +52,6 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 		return err
 	}
 
-	// 3. Get Lot IDs from Shipment Details
 	var detailIDs []string
 	err = tx.NewSelect().
 		Model((*domain.PengirimanDetail)(nil)).
@@ -62,7 +62,6 @@ func (r *salesRepository) Create(ctx context.Context, sales *domain.Penjualan) e
 		return err
 	}
 
-	// 4. Update Lot Status -> SOLD
 	if len(detailIDs) > 0 {
 		_, err = tx.NewUpdate().
 			Model((*domain.StokLot)(nil)).
@@ -126,13 +125,51 @@ func (r *salesRepository) GetByID(ctx context.Context, id string) (*domain.Penju
 	return sales, nil
 }
 
+func (r *salesRepository) GetByIDWithLock(ctx context.Context, tx bun.Tx, id string) (*domain.Penjualan, error) {
+	sales := new(domain.Penjualan)
+	err := tx.NewSelect().
+		Model(sales).
+		Relation("Pengiriman").
+		Relation("Pengiriman.Details").
+		Relation("Pengiriman.Details.Lot").
+		Relation("Pengiriman.Details.Lot.JenisDurianDetail").
+		Where("penjualan.id = ?", id).
+		Where("penjualan.deleted_at IS NULL").
+		For("UPDATE OF penjualan").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sales, nil
+}
+
 func (r *salesRepository) Update(ctx context.Context, sales *domain.Penjualan) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().
+	tx, err := r.db.InitQuery(ctx).Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var existing domain.Penjualan
+	err = tx.NewSelect().Model(&existing).
+		Where("id = ?", sales.ID).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.NewUpdate().
 		Model(sales).
 		Column("harga_total", "tipe_jual", "updated_at").
 		WherePK().
 		Exec(ctx)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *salesRepository) Delete(ctx context.Context, id string) error {
@@ -177,7 +214,21 @@ func (r *salesRepository) GetPengirimanByID(ctx context.Context, id string) (*do
 	err := r.db.InitQuery(ctx).NewSelect().
 		Model(shipment).
 		Relation("Details").
-		Where("p.id = ?", id).
+		Where("tb_pengiriman.id = ?", id).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return shipment, nil
+}
+
+func (r *salesRepository) GetPengirimanByIDWithLock(ctx context.Context, tx bun.Tx, id string) (*domain.Pengiriman, error) {
+	shipment := new(domain.Pengiriman)
+	err := tx.NewSelect().
+		Model(shipment).
+		Relation("Details").
+		Where("tb_pengiriman.id = ?", id).
+		For("UPDATE OF tb_pengiriman").
 		Scan(ctx)
 	if err != nil {
 		return nil, err
@@ -199,6 +250,16 @@ func (r *salesRepository) CheckSalesExistByShipmentID(ctx context.Context, shipm
 		Model((*domain.Penjualan)(nil)).
 		Where("pengiriman_id = ?", shipmentID).
 		Where("deleted_at IS NULL").
+		Count(ctx)
+	return count > 0, err
+}
+
+func (r *salesRepository) CheckSalesExistByShipmentIDWithLock(ctx context.Context, tx bun.Tx, shipmentID string) (bool, error) {
+	count, err := tx.NewSelect().
+		Model((*domain.Penjualan)(nil)).
+		Where("pengiriman_id = ?", shipmentID).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
 		Count(ctx)
 	return count > 0, err
 }

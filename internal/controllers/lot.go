@@ -1,11 +1,13 @@
 package controllers
 
 import (
+	"context"
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/services"
 	"durich-be/pkg/authentication"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +35,10 @@ func (c *LotController) Create(ctx *gin.Context) {
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	result, err := c.lotService.Create(ctx.Request.Context(), req, locationID)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := c.lotService.Create(reqCtx, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -54,15 +59,17 @@ func (c *LotController) GetList(ctx *gin.Context) {
 	jenisDurianID := ctx.Query("jenis_durian_id")
 	kondisi := ctx.Query("kondisi")
 	scope := ctx.Query("scope")
-	createdAt := ctx.Query("created_at") // Format: YYYY-MM-DD
+	createdAt := ctx.Query("created_at")
 
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	// DEBUG LOG
 	fmt.Printf("[DEBUG] LotController.GetList - UserID: %s, LocationID: '%s'\n", userAuth.UserID, locationID)
 
-	result, err := c.lotService.GetList(ctx.Request.Context(), status, jenisDurianID, kondisi, locationID, scope, createdAt)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := c.lotService.GetList(reqCtx, status, jenisDurianID, kondisi, locationID, scope, createdAt)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
@@ -80,7 +87,10 @@ func (c *LotController) GetList(ctx *gin.Context) {
 func (c *LotController) GetDetail(ctx *gin.Context) {
 	id := ctx.Param("id")
 
-	result, err := c.lotService.GetDetail(ctx.Request.Context(), id)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := c.lotService.GetDetail(reqCtx, id)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{
 			"status":  "error",
@@ -110,7 +120,10 @@ func (c *LotController) AddItems(ctx *gin.Context) {
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	result, err := c.lotService.AddItems(ctx.Request.Context(), id, req, locationID)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := c.lotService.AddItems(reqCtx, id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -141,7 +154,10 @@ func (c *LotController) RemoveItem(ctx *gin.Context) {
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	err := c.lotService.RemoveItem(ctx.Request.Context(), id, req, locationID)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	err := c.lotService.RemoveItem(reqCtx, id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",
@@ -159,13 +175,15 @@ func (c *LotController) RemoveItem(ctx *gin.Context) {
 func (c *LotController) Finalize(ctx *gin.Context) {
 	id := ctx.Param("id")
 
-	// No body required for Finalize
 	req := requests.LotFinalizeRequest{}
 
 	userAuth := ctx.MustGet(authentication.Token).(requests.UserAuth)
 	locationID := userAuth.LocationID
 
-	result, err := c.lotService.Finalize(ctx.Request.Context(), id, req, locationID)
+	reqCtx, cancel := context.WithTimeout(ctx.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := c.lotService.Finalize(reqCtx, id, req, locationID)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"status":  "error",

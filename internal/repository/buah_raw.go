@@ -19,6 +19,7 @@ type BuahRawRepository interface {
 	GetList(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error)
 	GetUnsorted(ctx context.Context, filter map[string]interface{}, limit, offset int) ([]domain.BuahRaw, int, error)
 	GetByID(ctx context.Context, id string) (domain.BuahRaw, error)
+	GetByIDWithLock(ctx context.Context, tx bun.Tx, id string) (domain.BuahRaw, error)
 	Update(ctx context.Context, data *domain.BuahRaw) error
 	Delete(ctx context.Context, id string) error
 	GetLotDetails(ctx context.Context, lotID string) ([]domain.BuahRaw, error)
@@ -88,8 +89,7 @@ func (r *buahRawRepository) GetUnsorted(ctx context.Context, filter map[string]i
 
 func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string]interface{}) *bun.SelectQuery {
 	includeRelations, ok := filter["include_relations"].(map[string]bool)
-	
-	// Check if location filter is present, we MUST join Lot
+
 	hasLocationFilter := false
 	if val, ok := filter["location_id"].(string); ok && val != "" {
 		hasLocationFilter = true
@@ -119,9 +119,8 @@ func (r *buahRawRepository) applyRelations(q *bun.SelectQuery, filter map[string
 	if includeRelations["pohon"] {
 		q = q.Relation("PohonPanenDetail")
 	}
-	
-	// Force join Lot if filtered by location, or requested
-	if hasLocationFilter || includeRelations["lot"] { // Assuming 'lot' might be requested explicitly too
+
+	if hasLocationFilter || includeRelations["lot"] {
 		q = q.Relation("Lot")
 	}
 
@@ -151,9 +150,6 @@ func (r *buahRawRepository) applyFilters(q *bun.SelectQuery, filter map[string]i
 		q = q.Where("pohon.blok_id = ?", val)
 	}
 	if val, ok := filter["location_id"].(string); ok && val != "" {
-		// Filter based on Lot Location (implies fruit must be in a lot)
-		// Since we join "Lot", we can filter by lot.current_location_id
-		// Bun alias for Relation("Lot") is usually "lot"
 		q = q.Where("lot.current_location_id = ?", val)
 	}
 
@@ -175,18 +171,74 @@ func (r *buahRawRepository) GetByID(ctx context.Context, id string) (domain.Buah
 	return data, err
 }
 
+func (r *buahRawRepository) GetByIDWithLock(ctx context.Context, tx bun.Tx, id string) (domain.BuahRaw, error) {
+	var data domain.BuahRaw
+	err := tx.NewSelect().Model(&data).
+		Relation("JenisDurianDetail").
+		Relation("PohonPanenDetail").
+		Relation("PohonPanenDetail.Blok").
+		Relation("PohonPanenDetail.Blok.Divisi").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate").
+		Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
+		Where("buah_raw.id = ?", id).
+		Where("buah_raw.deleted_at IS NULL").
+		For("UPDATE OF buah_raw").
+		Scan(ctx)
+	return data, err
+}
+
 func (r *buahRawRepository) Update(ctx context.Context, data *domain.BuahRaw) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().Model(data).WherePK().Exec(ctx)
-	return err
+	tx, err := r.db.InitQuery(ctx).Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var existing domain.BuahRaw
+	err = tx.NewSelect().Model(&existing).
+		Where("id = ?", data.ID).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.NewUpdate().Model(data).WherePK().Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *buahRawRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().
+	tx, err := r.db.InitQuery(ctx).Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var existing domain.BuahRaw
+	err = tx.NewSelect().Model(&existing).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		For("UPDATE").
+		Scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.NewUpdate().
 		Model((*domain.BuahRaw)(nil)).
 		Set("deleted_at = NOW()").
 		Where("id = ?", id).
 		Exec(ctx)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *buahRawRepository) Create(ctx context.Context, data *domain.BuahRaw) error {

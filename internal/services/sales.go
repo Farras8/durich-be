@@ -27,7 +27,6 @@ func NewSalesService(repo repository.SalesRepository) SalesService {
 }
 
 func (s *salesService) Create(ctx context.Context, req requests.SalesCreateRequest) (*response.SalesResponse, error) {
-
 	shipment, err := s.repo.GetPengirimanByID(ctx, req.PengirimanID)
 	if err != nil {
 		return nil, err
@@ -140,11 +139,6 @@ func (s *salesService) Update(ctx context.Context, id string, req requests.Sales
 }
 
 func (s *salesService) Delete(ctx context.Context, id string, locationID string, userRole string) error {
-	// Validation:
-	// 1. Central Users (LocationID == "") -> Allow All
-	// 2. Branch Admin (LocationID != "" AND Role == "admin") -> Allow
-	// 3. Branch Sales (LocationID != "" AND Role == "sales") -> Deny
-
 	if locationID != "" && userRole != "admin" {
 		return errors.ValidationError("akses ditolak: hanya admin cabang atau pusat yang dapat menghapus data penjualan")
 	}

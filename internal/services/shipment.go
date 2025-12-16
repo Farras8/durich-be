@@ -7,8 +7,12 @@ import (
 	"durich-be/internal/dto/requests"
 	"durich-be/internal/dto/response"
 	"durich-be/internal/repository"
+	"durich-be/pkg/database"
 	"durich-be/pkg/errors"
+	"fmt"
 	"time"
+
+	"github.com/uptrace/bun"
 )
 
 type ShipmentService interface {
@@ -23,12 +27,18 @@ type ShipmentService interface {
 }
 
 type shipmentService struct {
+	db         *database.Database
 	repo       repository.ShipmentRepository
 	tujuanRepo repository.TujuanPengirimanRepository
 }
 
-func NewShipmentService(repo repository.ShipmentRepository, tujuanRepo repository.TujuanPengirimanRepository) ShipmentService {
+func NewShipmentService(
+	db *database.Database,
+	repo repository.ShipmentRepository,
+	tujuanRepo repository.TujuanPengirimanRepository,
+) ShipmentService {
 	return &shipmentService{
+		db:         db,
 		repo:       repo,
 		tujuanRepo: tujuanRepo,
 	}
@@ -38,11 +48,6 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	kode, err := s.repo.GetNextShipmentKode(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	tujuanDetail, err := s.tujuanRepo.GetByID(ctx, req.TujuanID)
 	if err != nil {
 		return nil, errors.ValidationError("invalid tujuan_id")
@@ -51,26 +56,42 @@ func (s *shipmentService) Create(ctx context.Context, req requests.ShipmentCreat
 		return nil, errors.ValidationError("tujuan pengiriman not found")
 	}
 
-	tglKirim := req.TglKirim
-	if tglKirim.IsZero() {
-		tglKirim = time.Now()
-	}
+	var createdShipment *domain.Pengiriman
 
-	shipment := &domain.Pengiriman{
-		Kode:      kode,
-		Tujuan:    tujuanDetail.Nama,
-		TujuanID:  req.TujuanID,
-		TglKirim:  tglKirim,
-		Status:    constants.ShipmentStatusDraft,
-		CreatedBy: userID,
-	}
+	err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		kode, err := s.repo.GetNextShipmentKode(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to generate shipment code: %w", err)
+		}
 
-	err = s.repo.Create(ctx, shipment)
+		tglKirim := req.TglKirim
+		if tglKirim.IsZero() {
+			tglKirim = time.Now()
+		}
+
+		shipment := &domain.Pengiriman{
+			Kode:      kode,
+			Tujuan:    tujuanDetail.Nama,
+			TujuanID:  req.TujuanID,
+			TglKirim:  tglKirim,
+			Status:    constants.ShipmentStatusDraft,
+			CreatedBy: userID,
+		}
+
+		err = s.repo.Create(ctx, tx, shipment)
+		if err != nil {
+			return fmt.Errorf("failed to create shipment: %w", err)
+		}
+
+		createdShipment = shipment
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	resp := response.NewShipmentResponse(shipment)
+	resp := response.NewShipmentResponse(createdShipment)
 	return &resp, nil
 }
 
@@ -81,13 +102,16 @@ func (s *shipmentService) GetList(ctx context.Context, tujuan, status, locationI
 	if page < 1 {
 		page = 1
 	}
-	if limit < 1 || limit > 100 {
+	if limit < 1 {
 		limit = 20
 	}
+	if limit > 100 {
+		limit = 100
+	}
 
-	shipments, total, err := s.repo.GetList(ctx, tujuan, status, locationID, listType, tujuanType, page, limit)
+	shipments, total, err := s.repo.GetList(ctx, s.db.DB, tujuan, status, locationID, listType, tujuanType, page, limit)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to get shipment list: %w", err)
 	}
 
 	var resps []response.ShipmentResponse
@@ -101,13 +125,20 @@ func (s *shipmentService) GetByID(ctx context.Context, id string) (*response.Shi
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	p, err := s.repo.GetByID(ctx, id)
+	if id == "" {
+		return nil, errors.ValidationError("shipment id is required")
+	}
+
+	p, err := s.repo.GetByID(ctx, s.db.DB, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get shipment: %w", err)
+	}
+	if p == nil {
+		return nil, errors.NotFoundError("shipment not found")
 	}
 
 	header := response.NewShipmentResponse(p)
-	items := make([]response.ShipmentItemResponse, 0)
+	items := make([]response.ShipmentItemResponse, 0, len(p.Details))
 
 	for _, d := range p.Details {
 		item := response.ShipmentItemResponse{
@@ -136,134 +167,298 @@ func (s *shipmentService) AddItem(ctx context.Context, shipmentID string, req re
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	detail := &domain.PengirimanDetail{
-		PengirimanID: shipmentID,
-		LotSumberID:  req.LotID,
+	if shipmentID == "" {
+		return errors.ValidationError("shipment id is required")
+	}
+	if req.LotID == "" {
+		return errors.ValidationError("lot id is required")
 	}
 
-	return s.repo.AddItem(ctx, detail, locationID)
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		shipment, err := s.repo.GetByID(ctx, tx, shipmentID)
+		if err != nil {
+			return fmt.Errorf("failed to get shipment: %w", err)
+		}
+		if shipment == nil {
+			return errors.NotFoundError("shipment not found")
+		}
+		if shipment.Status != constants.ShipmentStatusDraft {
+			return errors.ValidationError("shipment must be DRAFT to add items")
+		}
+
+		for _, d := range shipment.Details {
+			if d.LotSumberID == req.LotID {
+				return errors.ValidationError("lot already added to this shipment")
+			}
+		}
+
+		detail := &domain.PengirimanDetail{
+			PengirimanID: shipmentID,
+			LotSumberID:  req.LotID,
+		}
+
+		err = s.repo.AddItem(ctx, tx, detail, locationID)
+		if err != nil {
+			return fmt.Errorf("failed to add item: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func (s *shipmentService) RemoveItem(ctx context.Context, shipmentID string, detailID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	return s.repo.RemoveItem(ctx, shipmentID, detailID)
+	if shipmentID == "" {
+		return errors.ValidationError("shipment id is required")
+	}
+	if detailID == "" {
+		return errors.ValidationError("detail id is required")
+	}
+
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		err := s.repo.RemoveItem(ctx, tx, shipmentID, detailID)
+		if err != nil {
+			return fmt.Errorf("failed to remove item: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *shipmentService) UpdateStatus(ctx context.Context, shipmentID string, req requests.ShipmentUpdateStatusRequest, userID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	shipment, err := s.repo.GetByID(ctx, shipmentID)
-	if err != nil {
-		return err
+	if shipmentID == "" {
+		return errors.ValidationError("shipment id is required")
+	}
+	if req.Status == "" {
+		return errors.ValidationError("status is required")
 	}
 
-	currentStatus := shipment.Status
-	newStatus := req.Status
-
-	isValidTransition := false
-	switch currentStatus {
-	case constants.ShipmentStatusDraft:
-		if newStatus == constants.ShipmentStatusSending {
-			isValidTransition = true
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		shipment, err := s.repo.GetByID(ctx, tx, shipmentID)
+		if err != nil {
+			return fmt.Errorf("failed to get shipment: %w", err)
 		}
-	case constants.ShipmentStatusSending:
+		if shipment == nil {
+			return errors.NotFoundError("shipment not found")
+		}
+
+		currentStatus := shipment.Status
+		newStatus := req.Status
+
+		isValidTransition := s.isValidStatusTransition(currentStatus, newStatus)
+		if !isValidTransition {
+			return errors.ValidationError(fmt.Sprintf("invalid status transition from %s to %s", currentStatus, newStatus))
+		}
+
 		if newStatus == constants.ShipmentStatusReceived {
-			isValidTransition = true
+			if len(shipment.Details) == 0 {
+				return errors.ValidationError("cannot mark as received: shipment has no items")
+			}
 		}
-	case constants.ShipmentStatusReceived:
-		if newStatus == constants.ShipmentStatusCompleted {
-			isValidTransition = true
+
+		err = s.repo.UpdateStatus(ctx, tx, shipmentID, newStatus, req.Notes, userID)
+		if err != nil {
+			return fmt.Errorf("failed to update status: %w", err)
 		}
+
+		return nil
+	})
+}
+
+func (s *shipmentService) isValidStatusTransition(current, target string) bool {
+	validTransitions := map[string][]string{
+		constants.ShipmentStatusDraft:    {constants.ShipmentStatusSending},
+		constants.ShipmentStatusSending:  {constants.ShipmentStatusReceived},
+		constants.ShipmentStatusReceived: {constants.ShipmentStatusCompleted},
 	}
 
-	if !isValidTransition {
-		return errors.ValidationError("invalid status transition from " + currentStatus + " to " + newStatus)
+	allowedTargets, exists := validTransitions[current]
+	if !exists {
+		return false
 	}
 
-	return s.repo.UpdateStatus(ctx, shipmentID, newStatus, req.Notes, userID)
+	for _, allowed := range allowedTargets {
+		if allowed == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *shipmentService) Finalize(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	shipment, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if shipment.Status != constants.ShipmentStatusDraft {
-		return errors.ValidationError("shipment must be DRAFT to finalize")
-	}
-	if len(shipment.Details) == 0 {
-		return errors.ValidationError("shipment cannot be empty")
+	if id == "" {
+		return errors.ValidationError("shipment id is required")
 	}
 
-	return s.repo.Finalize(ctx, id)
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		shipment, err := s.repo.GetByID(ctx, tx, id)
+		if err != nil {
+			return fmt.Errorf("failed to get shipment: %w", err)
+		}
+		if shipment == nil {
+			return errors.NotFoundError("shipment not found")
+		}
+
+		if shipment.Status != constants.ShipmentStatusDraft {
+			return errors.ValidationError("shipment must be DRAFT to finalize")
+		}
+
+		if len(shipment.Details) == 0 {
+			return errors.ValidationError("cannot finalize empty shipment")
+		}
+
+		tujuan, err := s.tujuanRepo.GetByID(ctx, shipment.TujuanID)
+		if err != nil {
+			return fmt.Errorf("failed to get tujuan: %w", err)
+		}
+		if tujuan == nil {
+			return errors.ValidationError("tujuan pengiriman not found")
+		}
+
+		details, err := s.repo.GetDetailsByShipmentID(ctx, tx, id)
+		if err != nil {
+			return fmt.Errorf("failed to get details: %w", err)
+		}
+
+		var lotIDs []string
+		for _, d := range details {
+			lotIDs = append(lotIDs, d.LotSumberID)
+		}
+
+		var bookedCount int
+		bookedCount, err = tx.NewSelect().
+			Model((*domain.StokLot)(nil)).
+			Where("id IN (?)", bun.In(lotIDs)).
+			Where("status = ?", constants.LotStatusBooked).
+			Count(ctx)
+		if err != nil {
+			return err
+		}
+		if bookedCount != len(details) {
+			return errors.ValidationError("all lots must be in BOOKED status")
+		}
+
+		err = s.repo.UpdateShipmentToSending(ctx, tx, id)
+		if err != nil {
+			return fmt.Errorf("failed to update shipment status: %w", err)
+		}
+
+		err = s.repo.UpdateLotsToShipped(ctx, tx, lotIDs)
+		if err != nil {
+			return fmt.Errorf("failed to update lot status: %w", err)
+		}
+
+		// ✅ TODO: Add audit log here if needed
+		// s.auditRepo.Log(ctx, tx, ...)
+
+		return nil
+	})
 }
 
 func (s *shipmentService) Receive(ctx context.Context, id string, req requests.ShipmentReceiveRequest) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// 1. Get Shipment
-	shipment, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
+	if id == "" {
+		return errors.ValidationError("shipment id is required")
 	}
-	if shipment == nil {
-		return errors.ValidationError("shipment not found")
+	if len(req.Details) == 0 {
+		return errors.ValidationError("received items cannot be empty")
+	}
+	if req.ReceivedDate.IsZero() {
+		return errors.ValidationError("received date is required")
+	}
+	if req.ReceivedDate.After(time.Now()) {
+		return errors.ValidationError("received date cannot be in the future")
 	}
 
-	// 2. Validate Status
-	if shipment.Status != constants.ShipmentStatusSending && shipment.Status != constants.ShipmentStatusSending {
-		// Note: Constants for sending might be SENDING or SHIPPED, checking for sending phase
-		// Assuming 'SENDING' is the status after finalize
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		shipment, err := s.repo.GetByID(ctx, tx, id)
+		if err != nil {
+			return fmt.Errorf("failed to get shipment: %w", err)
+		}
+		if shipment == nil {
+			return errors.NotFoundError("shipment not found")
+		}
+
 		if shipment.Status != constants.ShipmentStatusSending {
-			return errors.ValidationError("shipment must be in SENDING status to receive")
-		}
-	}
-
-	// 3. Validate Tujuan Type (Must be INTERNAL)
-	tujuan, err := s.tujuanRepo.GetByID(ctx, shipment.TujuanID)
-	if err != nil {
-		return err
-	}
-	if tujuan.Tipe != "internal" {
-		return errors.ValidationError("only internal shipments can be received via this endpoint")
-	}
-
-	// 4. Validate Items and Prepare Updates
-	updates := make(map[string]repository.ShipmentReceiveItem)
-	existingLots := make(map[string]domain.PengirimanDetail)
-
-	for _, detail := range shipment.Details {
-		existingLots[detail.LotSumberID] = detail
-	}
-
-	for _, item := range req.Details {
-		detail, exists := existingLots[item.LotID]
-		if !exists {
-			return errors.ValidationError("lot id " + item.LotID + " is not part of this shipment")
+			return errors.ValidationError(fmt.Sprintf("shipment must be in SENDING status to receive, current status: %s", shipment.Status))
 		}
 
-		finalQty := detail.QtyAmbil
-		if item.QtyDiterima != nil {
-			finalQty = *item.QtyDiterima
+		tujuan, err := s.tujuanRepo.GetByID(ctx, shipment.TujuanID)
+		if err != nil {
+			return fmt.Errorf("failed to get tujuan: %w", err)
+		}
+		if tujuan == nil {
+			return errors.ValidationError("tujuan pengiriman not found")
+		}
+		if tujuan.Tipe != "internal" {
+			return errors.ValidationError("only internal shipments can be received via this endpoint")
 		}
 
-		updates[item.LotID] = repository.ShipmentReceiveItem{
-			Berat: item.BeratDiterima,
-			Qty:   finalQty,
+		existingLots := make(map[string]domain.PengirimanDetail)
+		for _, detail := range shipment.Details {
+			existingLots[detail.LotSumberID] = detail
 		}
-	}
 
-	if len(updates) != len(shipment.Details) {
-		return errors.ValidationError("all items must be received")
-	}
+		updates := make(map[string]repository.ShipmentReceiveItem)
 
-	// 5. Execute Updates
-	return s.repo.Receive(ctx, id, updates, shipment.TujuanID, req.ReceivedDate)
+		for _, item := range req.Details {
+			detail, exists := existingLots[item.LotID]
+			if !exists {
+				return errors.ValidationError(fmt.Sprintf("lot id %s is not part of this shipment", item.LotID))
+			}
+			if item.BeratDiterima < 0 {
+				return errors.ValidationError(fmt.Sprintf("received weight cannot be negative for lot %s", item.LotID))
+			}
+			if item.BeratDiterima > detail.BeratAmbil*1.1 {
+				return errors.ValidationError(fmt.Sprintf("received weight exceeds sent weight by more than 10%% for lot %s", item.LotID))
+			}
+
+			finalQty := detail.QtyAmbil
+			if item.QtyDiterima != nil {
+				if *item.QtyDiterima < 0 {
+					return errors.ValidationError(fmt.Sprintf("received quantity cannot be negative for lot %s", item.LotID))
+				}
+				if *item.QtyDiterima > detail.QtyAmbil {
+					return errors.ValidationError(fmt.Sprintf("received quantity exceeds sent quantity for lot %s", item.LotID))
+				}
+				finalQty = *item.QtyDiterima
+			}
+
+			updates[item.LotID] = repository.ShipmentReceiveItem{
+				Berat: item.BeratDiterima,
+				Qty:   finalQty,
+			}
+		}
+
+		if len(updates) != len(shipment.Details) {
+			return errors.ValidationError("all items must be received")
+		}
+
+		err = s.repo.UpdateShipmentToReceived(ctx, tx, id, req.ReceivedDate)
+		if err != nil {
+			return fmt.Errorf("failed to update shipment status: %w", err)
+		}
+
+		for lotID, item := range updates {
+			err := s.repo.UpdateLotsAfterReceive(ctx, tx, lotID, shipment.TujuanID, item.Berat, item.Qty, req.ReceivedDate)
+			if err != nil {
+				return fmt.Errorf("failed to update lot %s: %w", lotID, err)
+			}
+
+			// ✅ TODO: Log discrepancy if received != sent
+			// Example: If item.Qty != existingLots[lotID].QtyAmbil
+			// s.discrepancyRepo.Log(ctx, tx, ...)
+		}
+
+		return nil
+	})
 }

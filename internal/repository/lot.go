@@ -3,41 +3,43 @@ package repository
 import (
 	"context"
 	"durich-be/internal/domain"
-	"durich-be/pkg/database"
 	"fmt"
+
+	"github.com/uptrace/bun"
 )
 
 type LotRepository interface {
-	Create(ctx context.Context, lot *domain.StokLot) error
-	GetByID(ctx context.Context, id string) (*domain.StokLot, error)
-	GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error)
-	Update(ctx context.Context, lot *domain.StokLot) error
-	AddBuah(ctx context.Context, buah *domain.BuahRaw) error
-	RemoveItem(ctx context.Context, lotID, buahRawID string) error
-	GetItemCount(ctx context.Context, lotID string) (int, error)
-	GetBuahRawByID(ctx context.Context, id string) (*domain.BuahRaw, error)
-	GetNextLotKode(ctx context.Context) (string, error)
-	GetNextLotSequence(ctx context.Context, dateStr, jenisKode, grade string) (string, error)
-	GetPohonByKode(ctx context.Context, kode string, blokID string) (*domain.Pohon, error)
-	GetTotalWeight(ctx context.Context, lotID string) (float64, error)
+	Create(ctx context.Context, db bun.IDB, lot *domain.StokLot) error
+	GetByID(ctx context.Context, db bun.IDB, id string) (*domain.StokLot, error)
+	GetByIDForUpdate(ctx context.Context, db bun.IDB, id string) (*domain.StokLot, error)
+	GetList(ctx context.Context, db bun.IDB, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error)
+	Update(ctx context.Context, db bun.IDB, lot *domain.StokLot) error
+	AddBuah(ctx context.Context, db bun.IDB, buah *domain.BuahRaw) error
+	RemoveItem(ctx context.Context, db bun.IDB, lotID, buahRawID string) error
+	GetItemCount(ctx context.Context, db bun.IDB, lotID string) (int, error)
+	GetBuahRawByID(ctx context.Context, db bun.IDB, id string) (*domain.BuahRaw, error)
+	GetNextLotKode(ctx context.Context, db bun.IDB) (string, error)
+	GetNextLotSequence(ctx context.Context, db bun.IDB, dateStr, jenisKode, grade string) (string, error)
+	GetPohonByKode(ctx context.Context, db bun.IDB, kode string, blokID string) (*domain.Pohon, error)
+	GetTotalWeight(ctx context.Context, db bun.IDB, lotID string) (float64, error)
 }
 
 type lotRepository struct {
-	db *database.Database
+	db *bun.DB
 }
 
-func NewLotRepository(db *database.Database) LotRepository {
+func NewLotRepository(db *bun.DB) LotRepository {
 	return &lotRepository{db: db}
 }
 
-func (r *lotRepository) Create(ctx context.Context, lot *domain.StokLot) error {
-	_, err := r.db.InitQuery(ctx).NewInsert().Model(lot).Exec(ctx)
+func (r *lotRepository) Create(ctx context.Context, db bun.IDB, lot *domain.StokLot) error {
+	_, err := db.NewInsert().Model(lot).Exec(ctx)
 	return err
 }
 
-func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot, error) {
+func (r *lotRepository) GetByID(ctx context.Context, db bun.IDB, id string) (*domain.StokLot, error) {
 	lot := new(domain.StokLot)
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model(lot).
 		Relation("JenisDurianDetail").
 		ColumnExpr("stok_lot.*").
@@ -52,9 +54,27 @@ func (r *lotRepository) GetByID(ctx context.Context, id string) (*domain.StokLot
 	return lot, nil
 }
 
-func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error) {
+func (r *lotRepository) GetByIDForUpdate(ctx context.Context, db bun.IDB, id string) (*domain.StokLot, error) {
+	lot := new(domain.StokLot)
+	err := db.NewSelect().
+		Model(lot).
+		Relation("JenisDurianDetail").
+		ColumnExpr("stok_lot.*").
+		ColumnExpr("(SELECT COUNT(*) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_qty").
+		ColumnExpr("(SELECT COALESCE(SUM(berat), 0) FROM tb_buah_raw WHERE lot_id = stok_lot.id) AS current_berat").
+		Where("stok_lot.id = ?", id).
+		Where("stok_lot.deleted_at IS NULL").
+		For("UPDATE OF stok_lot").
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return lot, nil
+}
+
+func (r *lotRepository) GetList(ctx context.Context, db bun.IDB, status, jenisDurianID, kondisi, locationID, scope, createdAt string) ([]domain.StokLot, error) {
 	var lots []domain.StokLot
-	query := r.db.InitQuery(ctx).NewSelect().
+	query := db.NewSelect().
 		Model(&lots).
 		Relation("JenisDurianDetail").
 		Relation("Posisi").
@@ -66,7 +86,6 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 	if locationID != "" {
 		query = query.Where("stok_lot.current_location_id = ?", locationID)
 	} else if scope == "local" {
-		// Central Admin requesting their own stock (IS NULL)
 		query = query.Where("stok_lot.current_location_id IS NULL")
 	}
 
@@ -92,22 +111,22 @@ func (r *lotRepository) GetList(ctx context.Context, status, jenisDurianID, kond
 	return lots, nil
 }
 
-func (r *lotRepository) Update(ctx context.Context, lot *domain.StokLot) error {
-	_, err := r.db.InitQuery(ctx).NewUpdate().
+func (r *lotRepository) Update(ctx context.Context, db bun.IDB, lot *domain.StokLot) error {
+	_, err := db.NewUpdate().
 		Model(lot).
 		WherePK().
 		Exec(ctx)
 	return err
 }
 
-func (r *lotRepository) AddBuah(ctx context.Context, buah *domain.BuahRaw) error {
-	_, err := r.db.InitQuery(ctx).NewInsert().Model(buah).Exec(ctx)
+func (r *lotRepository) AddBuah(ctx context.Context, db bun.IDB, buah *domain.BuahRaw) error {
+	_, err := db.NewInsert().Model(buah).Exec(ctx)
 	return err
 }
 
-func (r *lotRepository) GetPohonByKode(ctx context.Context, kode string, blokID string) (*domain.Pohon, error) {
+func (r *lotRepository) GetPohonByKode(ctx context.Context, db bun.IDB, kode string, blokID string) (*domain.Pohon, error) {
 	pohon := new(domain.Pohon)
-	query := r.db.InitQuery(ctx).NewSelect().
+	query := db.NewSelect().
 		Model(pohon).
 		Relation("Blok").
 		Relation("Blok.Divisi").
@@ -123,8 +142,8 @@ func (r *lotRepository) GetPohonByKode(ctx context.Context, kode string, blokID 
 	return pohon, nil
 }
 
-func (r *lotRepository) RemoveItem(ctx context.Context, lotID, buahRawID string) error {
-	_, err := r.db.InitQuery(ctx).NewDelete().
+func (r *lotRepository) RemoveItem(ctx context.Context, db bun.IDB, lotID, buahRawID string) error {
+	_, err := db.NewDelete().
 		Model((*domain.BuahRaw)(nil)).
 		Where("id = ?", buahRawID).
 		Where("lot_id = ?", lotID).
@@ -132,17 +151,17 @@ func (r *lotRepository) RemoveItem(ctx context.Context, lotID, buahRawID string)
 	return err
 }
 
-func (r *lotRepository) GetItemCount(ctx context.Context, lotID string) (int, error) {
-	count, err := r.db.InitQuery(ctx).NewSelect().
+func (r *lotRepository) GetItemCount(ctx context.Context, db bun.IDB, lotID string) (int, error) {
+	count, err := db.NewSelect().
 		Model((*domain.BuahRaw)(nil)).
 		Where("lot_id = ?", lotID).
 		Count(ctx)
 	return count, err
 }
 
-func (r *lotRepository) GetTotalWeight(ctx context.Context, lotID string) (float64, error) {
+func (r *lotRepository) GetTotalWeight(ctx context.Context, db bun.IDB, lotID string) (float64, error) {
 	var totalWeight float64
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model((*domain.BuahRaw)(nil)).
 		ColumnExpr("COALESCE(SUM(berat), 0)").
 		Where("lot_id = ?", lotID).
@@ -150,9 +169,9 @@ func (r *lotRepository) GetTotalWeight(ctx context.Context, lotID string) (float
 	return totalWeight, err
 }
 
-func (r *lotRepository) GetBuahRawByID(ctx context.Context, id string) (*domain.BuahRaw, error) {
+func (r *lotRepository) GetBuahRawByID(ctx context.Context, db bun.IDB, id string) (*domain.BuahRaw, error) {
 	buah := new(domain.BuahRaw)
-	err := r.db.InitQuery(ctx).NewSelect().
+	err := db.NewSelect().
 		Model(buah).
 		Relation("PohonPanenDetail.Blok.Divisi.Estate.Company").
 		Where("buah_raw.id = ?", id).
@@ -164,18 +183,11 @@ func (r *lotRepository) GetBuahRawByID(ctx context.Context, id string) (*domain.
 	return buah, nil
 }
 
-func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKode, grade string) (string, error) {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
-	// Pattern: LOT-KODE-GRADE-DDMMYY-%
+func (r *lotRepository) GetNextLotSequence(ctx context.Context, db bun.IDB, dateStr, jenisKode, grade string) (string, error) {
 	prefix := fmt.Sprintf("LOT-%s-%s-%s", jenisKode, grade, dateStr)
 
 	var lot domain.StokLot
-	err = tx.NewSelect().
+	err := db.NewSelect().
 		Model(&lot).
 		Column("kode").
 		Where("kode LIKE ?", prefix+"-%").
@@ -194,18 +206,12 @@ func (r *lotRepository) GetNextLotSequence(ctx context.Context, dateStr, jenisKo
 	}
 
 	newKode := fmt.Sprintf("%s-%02d", prefix, nextSeq)
-	return newKode, tx.Commit()
+	return newKode, nil
 }
 
-func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
-	tx, err := r.db.InitQuery(ctx).Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
+func (r *lotRepository) GetNextLotKode(ctx context.Context, db bun.IDB) (string, error) {
 	var lot domain.StokLot
-	err = tx.NewSelect().
+	err := db.NewSelect().
 		Model(&lot).
 		Column("kode").
 		Where("kode LIKE ?", "LOT-%").
@@ -216,7 +222,6 @@ func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
 
 	nextSeq := 1
 	if err == nil && lot.Kode != "" {
-		// Extract number from LOT-001
 		var seq int
 		_, err = fmt.Sscanf(lot.Kode, "LOT-%d", &seq)
 		if err == nil {
@@ -226,8 +231,9 @@ func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
 
 	newKode := fmt.Sprintf("LOT-%03d", nextSeq)
 
+	// Check if exists
 	var existing domain.StokLot
-	err = tx.NewSelect().
+	err = db.NewSelect().
 		Model(&existing).
 		Where("kode = ?", newKode).
 		Scan(ctx)
@@ -236,5 +242,5 @@ func (r *lotRepository) GetNextLotKode(ctx context.Context) (string, error) {
 		newKode = fmt.Sprintf("LOT-%03d", nextSeq)
 	}
 
-	return newKode, tx.Commit()
+	return newKode, nil
 }

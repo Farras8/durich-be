@@ -6,8 +6,8 @@ type LotCreateRequest struct {
 }
 
 type LotAddItemsRequest struct {
-	PohonKode string  `json:"pohon_kode" binding:"required"` // Kode pohon
-	BlokID    string  `json:"blok_id" binding:"required"`    // UUID blok
+	PohonKode string  `json:"pohon_kode" binding:"required"` 
+	BlokID    string  `json:"blok_id" binding:"required"`    
 	Berat     float64 `json:"berat" binding:"required,gt=0"`
 }
 
